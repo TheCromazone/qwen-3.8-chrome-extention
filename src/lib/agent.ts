@@ -8,7 +8,7 @@
  */
 import { OllamaClient, collectStream, parseToolCallFromText, splitInlineThinking } from './ollama.ts';
 import { agentSystemPrompt, jsonToolInstructions } from './prompts.ts';
-import { FINISH_TOOL, agentTools, argBool, argInt, argString, coerceArgs, describeTools } from './tools.ts';
+import { FINISH_TOOL, actionSchema, agentTools, argBool, argInt, argString, coerceArgs, describeTools } from './tools.ts';
 import { assessClick, assessNavigation, assessTyping, isBlockedUrl, wrapUntrusted } from './safety.ts';
 import { formatElements } from '../content/elements.ts';
 import { formatTranscript } from '../content/youtube.ts';
@@ -37,6 +37,9 @@ export interface AgentResult {
   stopped: boolean;
 }
 
+/** Identical observations in a row that mean the agent is going nowhere. */
+const STUCK_THRESHOLD = 3;
+
 export async function runAgent(options: AgentRunOptions, callbacks: AgentCallbacks): Promise<AgentResult> {
   const { task, settings, capabilities, signal } = options;
   const client = new OllamaClient(settings.ollamaUrl);
@@ -49,6 +52,9 @@ export async function runAgent(options: AgentRunOptions, callbacks: AgentCallbac
   let tabId = options.tabId;
   let lastElements: InteractiveElement[] = [];
   let iteration = 0;
+  // A model that keeps acting without changing anything will grind through
+  // every remaining step. Watch for the page coming back identical instead.
+  const recentResults: string[] = [];
 
   const emit = (step: Omit<AgentStep, 'at' | 'iteration'> & { iteration?: number }) =>
     callbacks.onStep({ iteration, at: Date.now(), ...step });
@@ -82,7 +88,9 @@ export async function runAgent(options: AgentRunOptions, callbacks: AgentCallbac
       {
         model: settings.model,
         messages,
-        ...(canCallTools ? { tools } : {}),
+        // Native tool calling when the model has it; a constraining grammar when
+        // it does not, so an invalid action cannot be decoded in the first place.
+        ...(canCallTools ? { tools } : { format: actionSchema(tools) }),
         ...(canThink ? { think: settings.reasoningEffort } : {}),
         keep_alive: settings.keepAlive,
         options: { temperature: settings.temperature, num_ctx: settings.numCtx },
@@ -160,6 +168,17 @@ export async function runAgent(options: AgentRunOptions, callbacks: AgentCallbac
 
     emit({ kind: 'tool_result', text: result, toolName: name });
     messages.push({ role: 'tool', tool_name: name, content: result });
+
+    recentResults.push(result);
+    if (recentResults.length > STUCK_THRESHOLD) recentResults.shift();
+    if (recentResults.length === STUCK_THRESHOLD && recentResults.every((r) => r === recentResults[0])) {
+      const summary =
+        `Stopped after ${STUCK_THRESHOLD} steps that left the page unchanged. ` +
+        `The last thing I tried was ${describeCall(name, args)}, and it made no difference. ` +
+        `The task may need something I cannot reach from this page.`;
+      emit({ kind: 'error', text: summary });
+      return { summary, succeeded: false, steps: iteration, stopped: false };
+    }
   }
 
   const summary = `Reached the ${settings.maxSteps}-step limit without finishing. Raise the limit in settings, or give me a narrower task.`;

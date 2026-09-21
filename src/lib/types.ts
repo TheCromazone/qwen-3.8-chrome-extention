@@ -57,6 +57,12 @@ export interface ChatRequest {
   think?: boolean | ReasoningEffort;
   /** How long Ollama keeps the model resident. It unloads after 5m by default. */
   keep_alive?: string;
+  /**
+   * A JSON schema Ollama constrains the reply to. Used for models without
+   * native tool calling: a grammar that cannot express an invalid action keeps
+   * a local model on the rails far better than asking it nicely.
+   */
+  format?: Record<string, unknown> | 'json';
   options?: {
     temperature?: number;
     num_ctx?: number;

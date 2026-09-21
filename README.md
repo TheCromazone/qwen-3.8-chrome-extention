@@ -24,9 +24,11 @@ immediately.
 
 - Google Chrome 120 or newer.
 - [Ollama](https://ollama.com/download) installed and running.
-- A GPU with enough VRAM for the model. The default, `qwen3.8:27b` at Q4_K_M, is
-  roughly 18 GB of weights and wants about 24 GB of VRAM; on a 32 GB card it runs
-  comfortably with a large context window.
+- A GPU with enough VRAM for the model. The default, `qwen3.8:27b`, is an 18 GB
+  download with a 256K native context and reports vision, tool calling and
+  thinking. It wants about 24 GB of VRAM; on a 32 GB card it runs comfortably
+  with a large context window. Other tags (MLX for Apple Silicon, higher
+  precision builds) are listed on [its Ollama page](https://ollama.com/library/qwen3.8).
 
 ## Setup
 
@@ -108,7 +110,8 @@ Also worth knowing:
 - **Page text per question** (24,000 characters) is trimmed from the middle, not
   the end, so a page's conclusions survive.
 - **Maximum agent steps** (30) is a hard stop, so a confused run always
-  terminates.
+  terminates. It usually stops sooner: three actions in a row that leave the
+  page unchanged end the run rather than grinding through the remaining steps.
 - **Ask before buying, sending, deleting or leaving the current site** is on by
   default. Leave it on — see below.
 
@@ -177,6 +180,13 @@ the new page's element list, so the model is never working from a stale picture
 after a navigation — the numbers are regenerated each time and the newest list is
 always the one in front of it. This is what keeps it oriented when a click lands
 somewhere unexpected.
+
+**A model without tool calling gets a grammar, not just instructions.** Where
+Ollama reports native tool support, that is used. Where it does not, the request
+carries a JSON schema with a closed enum of action names, so an action that does
+not exist cannot be decoded in the first place — which holds a small local model
+on the rails much better than asking it to behave. The free-text JSON parser is
+still there as a last resort.
 
 **Screenshots are a fallback, not the medium.** Describing the page as structured
 text is far faster than making a 27B model read pixels on every step, which

@@ -102,6 +102,22 @@ export function describeTools(tools: ToolSchema[]): string {
 }
 
 /**
+ * A JSON schema for one action, with a closed enum of tool names. Handed to
+ * Ollama as `format` when the model has no native tool calling, so the decoder
+ * itself cannot produce a tool that does not exist.
+ */
+export function actionSchema(tools: ToolSchema[]): Record<string, unknown> {
+  return {
+    type: 'object',
+    properties: {
+      tool: { type: 'string', enum: tools.map((t) => t.function.name) },
+      arguments: { type: 'object' },
+    },
+    required: ['tool', 'arguments'],
+  };
+}
+
+/**
  * Models hand back arguments loosely typed — "12" for a number, "true" for a
  * boolean, sometimes a JSON string for the whole object. Normalise before use.
  */

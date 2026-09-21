@@ -83,6 +83,7 @@ describe('runAgent', () => {
     assert.equal(result.succeeded, true);
     assert.equal(result.summary, 'The Fell Runner at 89 pounds.');
     assert.equal(result.steps, 3);
+    assert.equal(mock.requests[0]?.format, undefined, 'a model with native tools needs no grammar');
     assert.equal(chrome.tabs[0]?.url, 'https://shop.test/boots', 'the click should have navigated the tab');
     assert.ok(steps.some((s) => s.kind === 'thinking'), 'reasoning should be surfaced as a step');
   });
@@ -206,15 +207,15 @@ describe('runAgent', () => {
 
   test('stops at the step limit instead of looping forever', async () => {
     mock = await startMockOllama({
-      script: Array.from({ length: 6 }, () => ({ toolCalls: [call('scroll', { direction: 'down' })] })),
+      script: Array.from({ length: 6 }, () => ({ toolCalls: [call('find_text', { text: 'boots' })] })),
     });
     chrome = installFakeChrome({ pages: PAGES, startUrl: 'https://shop.test/' });
 
     const result = await runAgent(
       {
-        task: 'scroll forever',
+        task: 'search forever',
         tabId: 1,
-        settings: settings({ ollamaUrl: mock.url, maxSteps: 4, confirmRiskyActions: false }),
+        settings: settings({ ollamaUrl: mock.url, maxSteps: 2, confirmRiskyActions: false }),
         capabilities: CAPABLE,
         signal: new AbortController().signal,
       },
@@ -222,8 +223,31 @@ describe('runAgent', () => {
     );
 
     assert.equal(result.succeeded, false);
-    assert.equal(result.steps, 4);
-    assert.match(result.summary, /4-step limit/);
+    assert.equal(result.steps, 2);
+    assert.match(result.summary, /2-step limit/);
+  });
+
+  test('gives up when three actions in a row leave the page unchanged', async () => {
+    mock = await startMockOllama({
+      script: Array.from({ length: 8 }, () => ({ toolCalls: [call('scroll', { direction: 'down' })] })),
+    });
+    chrome = installFakeChrome({ pages: PAGES, startUrl: 'https://shop.test/' });
+
+    const result = await runAgent(
+      {
+        task: 'scroll to something that is not there',
+        tabId: 1,
+        settings: settings({ ollamaUrl: mock.url, maxSteps: 30, confirmRiskyActions: false }),
+        capabilities: CAPABLE,
+        signal: new AbortController().signal,
+      },
+      { onStep: () => {}, requestConfirmation: async () => true },
+    );
+
+    assert.equal(result.succeeded, false);
+    assert.equal(result.steps, 3, 'it should stop well before the 30-step limit');
+    assert.match(result.summary, /left the page unchanged/);
+    assert.match(result.summary, /scroll/, 'the summary should name what it kept trying');
   });
 
   test('nudges the model back to a tool call when it answers with prose', async () => {
@@ -275,6 +299,14 @@ describe('runAgent', () => {
     assert.equal(result.summary, 'Found boots on the page.');
     assert.equal(mock.requests[0]?.tools, undefined, 'no tools field for a model that cannot use it');
     assert.match(present(mock.requests[0]?.messages[0], 'the system prompt').content, /single JSON object/);
+
+    // The grammar is what actually keeps a small model on the rails; the prompt
+    // is only the explanation of it.
+    const format = mock.requests[0]?.format as { properties?: Record<string, { enum?: string[] }> } | undefined;
+    const names = format?.properties?.tool?.enum ?? [];
+    assert.ok(names.includes('click'), 'the action enum should list the real tools');
+    assert.ok(names.includes('finish'));
+    assert.ok(!names.includes('take_screenshot'), 'a text-only model must not be offered screenshots');
   });
 
   test('stops promptly when the user hits stop', async () => {
