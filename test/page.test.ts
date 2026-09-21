@@ -2,6 +2,7 @@ import { test, describe, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { extractReadableText, findMainContent, trimToBudget } from '../src/content/extract.ts';
 import { accessibleName, formatElements, indexInteractiveElements } from '../src/content/elements.ts';
+import { typeIntoRef } from '../src/content/actions.ts';
 import { withDom, type DomHandle } from './helpers/dom.ts';
 import { present } from './helpers/present.ts';
 
@@ -121,12 +122,42 @@ describe('indexInteractiveElements', () => {
     assert.ok(!names.includes('csrf'), 'hidden inputs are not actionable');
   });
 
-  test('never surfaces the contents of a password field', () => {
+  test('never surfaces the contents of a password field, and marks it sensitive', () => {
     handle = withDom(FORM);
     const elements = indexInteractiveElements(handle.document);
     const password = present(elements.find((el) => el.name === 'Password'), 'the password field');
     assert.equal(password.value, undefined);
+    assert.equal(password.role, 'password');
+    assert.equal(password.sensitive, true);
     assert.doesNotMatch(formatElements(elements), /hunter2/);
+    assert.match(formatElements(elements), /"Password" \[[^\]]*sensitive/);
+  });
+
+  test('refuses to type into a password field even when asked directly', () => {
+    handle = withDom(FORM);
+    const elements = indexInteractiveElements(handle.document);
+    const password = present(elements.find((el) => el.name === 'Password'), 'the password field');
+    const result = typeIntoRef(password.ref, 'letmein', false);
+    assert.equal(result.ok, false);
+    assert.match(result.detail, /^Refused:/);
+    const input = present(handle.document.querySelector<HTMLInputElement>('#pw'), 'the input');
+    assert.equal(input.value, 'hunter2', 'the field must be untouched');
+  });
+
+  test('refuses payment fields by autocomplete token too', () => {
+    handle = withDom('<html><body><main><p>' + 'pad '.repeat(80) + '</p><input aria-label="Card number" autocomplete="cc-number" /></main></body></html>');
+    const [card] = indexInteractiveElements(handle.document);
+    assert.equal(present(card, 'the card field').sensitive, true);
+    assert.equal(typeIntoRef(card!.ref, '4111', false).ok, false);
+  });
+
+  test('says when a link leaves the current site', () => {
+    handle = withDom('<html><body><main><p>' + 'pad '.repeat(80) + '</p><a href="/help">Help</a><a href="https://elsewhere.example/x">Partners</a></main></body></html>');
+    const elements = indexInteractiveElements(handle.document);
+    const listing = formatElements(elements, 'example.test');
+    assert.match(listing, /"Help"(?! \[[^\]]*leaves site)/);
+    assert.match(listing, /"Partners" \[[^\]]*leaves site: elsewhere\.example/);
+    assert.equal(present(elements.find((e) => e.name === 'Partners'), 'the link').href, 'https://elsewhere.example/x');
   });
 
   test('marks disabled controls so the model does not waste a step', () => {

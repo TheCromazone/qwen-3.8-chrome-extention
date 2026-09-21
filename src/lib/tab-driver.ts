@@ -83,6 +83,12 @@ export async function navigateTab(tabId: number, url: string): Promise<void> {
   await waitForLoad(tabId);
 }
 
+/** Steps back one history entry, used to undo a navigation that left the task's scope. */
+export async function goBack(tabId: number): Promise<void> {
+  await chrome.tabs.goBack(tabId);
+  await waitForLoad(tabId, 8000);
+}
+
 export async function openTab(url: string): Promise<chrome.tabs.Tab> {
   const tab = await chrome.tabs.create({ url, active: true });
   if (tab.id) await waitForLoad(tab.id);

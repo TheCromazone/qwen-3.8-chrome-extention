@@ -5,20 +5,44 @@
  * comes back as the tool result. The model therefore never has to remember what
  * the page looked like across a navigation — element numbers are regenerated
  * each time and the newest list is always the one in front of it.
+ *
+ * The gates live here and in the content script, not in the prompt. A task is
+ * fenced to the site it started on plus any site the user named; credential
+ * fields are never filled; and consequential same-site actions wait for the
+ * user, with silence counting as no.
  */
 import { OllamaClient, collectStream, parseToolCallFromText, splitInlineThinking } from './ollama.ts';
 import { agentSystemPrompt, jsonToolInstructions } from './prompts.ts';
 import { FINISH_TOOL, actionSchema, agentTools, argBool, argInt, argString, coerceArgs, describeTools } from './tools.ts';
-import { assessClick, assessNavigation, assessTyping, isBlockedUrl, wrapUntrusted } from './safety.ts';
+import {
+  assessClick,
+  assessNavigation,
+  assessTyping,
+  buildScope,
+  detectInjectionAttempt,
+  hostOf,
+  isBlockedUrl,
+  isHostAllowed,
+  wrapUntrusted,
+} from './safety.ts';
 import { formatElements } from '../content/elements.ts';
 import { formatTranscript } from '../content/youtube.ts';
 import * as tabs from './tab-driver.ts';
-import type { AgentStep, ChatMessage, InteractiveElement, ModelCapabilities, Observation, Settings, ToolCall } from './types.ts';
+import type {
+  AgentStep,
+  BlockedReason,
+  ChatMessage,
+  InteractiveElement,
+  ModelCapabilities,
+  Observation,
+  Settings,
+  ToolCall,
+} from './types.ts';
 
 export interface AgentCallbacks {
   onStep: (step: AgentStep) => void;
   onToken?: (token: string, kind: 'content' | 'thinking') => void;
-  /** Resolves true when the user approves a gated action. */
+  /** Resolves true when the user approves a gated action. Unanswered for long enough counts as no. */
   requestConfirmation: (description: string) => Promise<boolean>;
 }
 
@@ -28,6 +52,10 @@ export interface AgentRunOptions {
   settings: Settings;
   capabilities: ModelCapabilities | null;
   signal: AbortSignal;
+  /** Extra hosts the task may visit, on top of the starting site and any the task names. */
+  allowOrigins?: string[];
+  /** How long a confirmation may wait for the user before it counts as declined. */
+  confirmTimeoutMs?: number;
 }
 
 export interface AgentResult {
@@ -35,10 +63,15 @@ export interface AgentResult {
   succeeded: boolean;
   steps: number;
   stopped: boolean;
+  /** Things the harness noticed along the way, such as 'prompt-injection-detected'. */
+  flags: string[];
 }
 
 /** Identical observations in a row that mean the agent is going nowhere. */
 const STUCK_THRESHOLD = 3;
+
+/** How long a confirmation may sit unanswered before it is treated as declined. */
+export const CONFIRM_TIMEOUT_MS = 60_000;
 
 export async function runAgent(options: AgentRunOptions, callbacks: AgentCallbacks): Promise<AgentResult> {
   const { task, settings, capabilities, signal } = options;
@@ -52,6 +85,7 @@ export async function runAgent(options: AgentRunOptions, callbacks: AgentCallbac
   let tabId = options.tabId;
   let lastElements: InteractiveElement[] = [];
   let iteration = 0;
+  const flags = new Set<string>();
   // A model that keeps acting without changing anything will grind through
   // every remaining step. Watch for the page coming back identical instead.
   const recentResults: string[] = [];
@@ -59,19 +93,44 @@ export async function runAgent(options: AgentRunOptions, callbacks: AgentCallbac
   const emit = (step: Omit<AgentStep, 'at' | 'iteration'> & { iteration?: number }) =>
     callbacks.onStep({ iteration, at: Date.now(), ...step });
 
+  const finish = (summary: string, succeeded: boolean, stopped = false): AgentResult => ({
+    summary,
+    succeeded,
+    steps: iteration,
+    stopped,
+    flags: [...flags],
+  });
+
+  const startTab = await chrome.tabs.get(tabId).catch(() => null);
+  const scope = buildScope(startTab?.url ?? '', task, options.allowOrigins ?? []);
+
   const systemPrompt = canCallTools
     ? agentSystemPrompt(capabilities, settings.maxSteps)
     : `${agentSystemPrompt(capabilities, settings.maxSteps)}\n\n${jsonToolInstructions(describeTools(tools))}`;
 
   const messages: ChatMessage[] = [
     { role: 'system', content: systemPrompt },
-    { role: 'user', content: `Task: ${task}` },
+    { role: 'user', content: `Task: ${task}\n\nSites this task may use: ${[...scope].join(', ') || '(none yet)'}. Links to other sites will be refused; if the task needs one, finish and say which.` },
   ];
+
+  const ctx: ExecuteContext = {
+    tabId,
+    lastElements,
+    settings,
+    canSee,
+    signal,
+    scope,
+    flags,
+    emit,
+    requestConfirmation: callbacks.requestConfirmation,
+    confirmTimeoutMs: options.confirmTimeoutMs ?? CONFIRM_TIMEOUT_MS,
+  };
 
   // Seed the loop with what is already on screen, so the first decision is informed.
   try {
     const observation = await tabs.observePage(tabId);
     lastElements = observation.elements;
+    noteInjection(observation, flags);
     messages.push({ role: 'user', content: renderObservation(observation, 'Starting page') });
   } catch (error) {
     messages.push({
@@ -81,7 +140,7 @@ export async function runAgent(options: AgentRunOptions, callbacks: AgentCallbac
   }
 
   while (iteration < settings.maxSteps) {
-    if (signal.aborted) return { summary: 'Stopped by the user.', succeeded: false, steps: iteration, stopped: true };
+    if (signal.aborted) return finish('Stopped by the user.', false, true);
     iteration += 1;
 
     const stream = client.chat(
@@ -102,9 +161,9 @@ export async function runAgent(options: AgentRunOptions, callbacks: AgentCallbac
     try {
       collected = await collectStream(stream, callbacks.onToken);
     } catch (error) {
-      if (signal.aborted) return { summary: 'Stopped by the user.', succeeded: false, steps: iteration, stopped: true };
+      if (signal.aborted) return finish('Stopped by the user.', false, true);
       emit({ kind: 'error', text: errorText(error) });
-      return { summary: errorText(error), succeeded: false, steps: iteration, stopped: false };
+      return finish(errorText(error), false);
     }
 
     const { content, thinking } = splitInlineThinking(collected.content);
@@ -140,34 +199,38 @@ export async function runAgent(options: AgentRunOptions, callbacks: AgentCallbac
       const summary = argString(args, 'summary') ?? content.trim() ?? 'Done.';
       const succeeded = argBool(args, 'succeeded', true);
       emit({ kind: 'done', text: summary });
-      return { summary, succeeded, steps: iteration, stopped: false };
+      return finish(summary, succeeded);
     }
 
     let result: string;
+    let halt: string | undefined;
     try {
-      const outcome = await execute(name, args, {
-        tabId,
-        lastElements,
-        settings,
-        canSee,
-        signal,
-        requestConfirmation: callbacks.requestConfirmation,
-      });
+      ctx.tabId = tabId;
+      ctx.lastElements = lastElements;
+      const outcome = await execute(name, args, ctx);
       result = outcome.text;
+      halt = outcome.halt;
       if (outcome.tabId) tabId = outcome.tabId;
       if (outcome.elements) lastElements = outcome.elements;
       if (outcome.images?.length) {
         messages.push({ role: 'tool', tool_name: name, content: result, images: outcome.images });
-        emit({ kind: 'tool_result', text: result, toolName: name });
+        emit({ kind: 'tool_result', text: result, toolName: name, toolArgs: args });
         continue;
       }
     } catch (error) {
-      if (signal.aborted) return { summary: 'Stopped by the user.', succeeded: false, steps: iteration, stopped: true };
+      if (signal.aborted) return finish('Stopped by the user.', false, true);
       result = `Error: ${errorText(error)}`;
     }
 
-    emit({ kind: 'tool_result', text: result, toolName: name });
+    emit({ kind: 'tool_result', text: result, toolName: name, toolArgs: args });
     messages.push({ role: 'tool', tool_name: name, content: result });
+
+    // Some refusals hand control back to the user rather than letting the model
+    // try another route: there is no other route to a password field.
+    if (halt) {
+      emit({ kind: 'error', text: halt });
+      return finish(halt, false);
+    }
 
     recentResults.push(result);
     if (recentResults.length > STUCK_THRESHOLD) recentResults.shift();
@@ -177,13 +240,13 @@ export async function runAgent(options: AgentRunOptions, callbacks: AgentCallbac
         `The last thing I tried was ${describeCall(name, args)}, and it made no difference. ` +
         `The task may need something I cannot reach from this page.`;
       emit({ kind: 'error', text: summary });
-      return { summary, succeeded: false, steps: iteration, stopped: false };
+      return finish(summary, false);
     }
   }
 
   const summary = `Reached the ${settings.maxSteps}-step limit without finishing. Raise the limit in settings, or give me a narrower task.`;
   emit({ kind: 'error', text: summary });
-  return { summary, succeeded: false, steps: iteration, stopped: false };
+  return finish(summary, false);
 }
 
 interface ExecuteContext {
@@ -192,7 +255,12 @@ interface ExecuteContext {
   settings: Settings;
   canSee: boolean;
   signal: AbortSignal;
+  /** Hosts this task may visit. */
+  scope: Set<string>;
+  flags: Set<string>;
+  emit: (step: Omit<AgentStep, 'at' | 'iteration'>) => void;
   requestConfirmation: (description: string) => Promise<boolean>;
+  confirmTimeoutMs: number;
 }
 
 interface ExecuteOutcome {
@@ -200,24 +268,51 @@ interface ExecuteOutcome {
   tabId?: number;
   elements?: InteractiveElement[];
   images?: string[];
+  /** When set, the run ends with this summary after the result is recorded. */
+  halt?: string;
 }
 
 async function execute(name: string, args: Record<string, unknown>, ctx: ExecuteContext): Promise<ExecuteOutcome> {
   const { tabId, settings } = ctx;
   const elementFor = (ref: number | null) => ctx.lastElements.find((el) => el.ref === ref);
 
-  const gate = async (assessment: { risky: boolean; reason: string }): Promise<string | null> => {
+  const refuse = (reason: BlockedReason, text: string): ExecuteOutcome => {
+    ctx.emit({ kind: 'blocked', text, blockedReason: reason, toolName: name, toolArgs: args });
+    return { text };
+  };
+
+  const outOfScope = (url: string): ExecuteOutcome =>
+    refuse(
+      'off-origin',
+      `Refused: ${hostOf(url) ?? url} is outside this task's sites (${[...ctx.scope].join(', ')}). ` +
+        `Nothing on a page can widen that. Continue within the allowed sites, or finish and tell the user which site the task needs.`,
+    );
+
+  /** Same-site consequential actions wait for the user; no answer means no. */
+  const gate = async (assessment: { risky: boolean; reason: string }): Promise<ExecuteOutcome | null> => {
     if (!assessment.risky || !settings.confirmRiskyActions) return null;
-    const approved = await ctx.requestConfirmation(assessment.reason);
-    return approved ? null : `Blocked: the user declined this action (${assessment.reason}) Choose a different approach.`;
+    const approved = await Promise.race([
+      ctx.requestConfirmation(assessment.reason),
+      new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), ctx.confirmTimeoutMs)),
+    ]);
+    if (approved === true) return null;
+    const why = approved === 'timeout' ? 'the user did not answer in time' : 'the user declined';
+    return refuse(
+      'needs-confirmation',
+      `Blocked: ${why} (${assessment.reason}) Choose a different approach, or finish and explain.`,
+    );
   };
 
   switch (name) {
     case 'click': {
       const ref = argInt(args, 'ref');
       if (ref === null) return { text: 'Error: click needs a ref, e.g. {"ref": 12}.' };
-      const blocked = await gate(assessClick(elementFor(ref)));
-      if (blocked) return { text: blocked };
+      const target = elementFor(ref);
+      // A link's destination is checked before the click, not after the page
+      // has already gone there.
+      if (target?.href && !isHostAllowed(target.href, ctx.scope)) return outOfScope(target.href);
+      const blocked = await gate(assessClick(target));
+      if (blocked) return blocked;
       const result = await tabs.performAction(tabId, { kind: 'click', ref });
       return withObservation(ctx, result.detail, { settle: true });
     }
@@ -226,10 +321,17 @@ async function execute(name: string, args: Record<string, unknown>, ctx: Execute
       const ref = argInt(args, 'ref');
       const text = argString(args, 'text');
       if (ref === null || text === null) return { text: 'Error: type_text needs a ref and text.' };
+      const target = elementFor(ref);
+      if (target?.sensitive) return credentialRefusal(ctx, ref, name, args);
+
       const submit = argBool(args, 'submit', false);
-      const blocked = await gate(assessTyping(elementFor(ref), submit));
-      if (blocked) return { text: blocked };
+      const blocked = await gate(assessTyping(target, submit));
+      if (blocked) return blocked;
+
       const result = await tabs.performAction(tabId, { kind: 'type', ref, text, submit });
+      // The content script checks the live node too; if it refused, the index
+      // was stale and the same rule applies.
+      if (!result.ok && result.detail.startsWith('Refused:')) return credentialRefusal(ctx, ref, name, args);
       return withObservation(ctx, result.detail, { settle: submit });
     }
 
@@ -271,9 +373,9 @@ async function execute(name: string, args: Record<string, unknown>, ctx: Execute
       const url = argString(args, 'url');
       if (!url) return { text: 'Error: navigate needs a url.' };
       if (isBlockedUrl(url)) return { text: `Blocked: ${url} is not a page an extension may drive.` };
-      const current = await chrome.tabs.get(tabId).catch(() => null);
-      const blocked = await gate(assessNavigation(url, current?.url ?? ''));
-      if (blocked) return { text: blocked };
+      const shape = assessNavigation(url);
+      if (shape.risky) return { text: `Blocked: ${shape.reason}` };
+      if (!isHostAllowed(url, ctx.scope)) return outOfScope(url);
       await tabs.navigateTab(tabId, url);
       return withObservation(ctx, `Navigated to ${url}.`, { settle: true });
     }
@@ -282,8 +384,9 @@ async function execute(name: string, args: Record<string, unknown>, ctx: Execute
       const url = argString(args, 'url');
       if (!url) return { text: 'Error: open_tab needs a url.' };
       if (isBlockedUrl(url)) return { text: `Blocked: ${url} is not a page an extension may drive.` };
-      const blocked = await gate(assessNavigation(url, ''));
-      if (blocked) return { text: blocked };
+      const shape = assessNavigation(url);
+      if (shape.risky) return { text: `Blocked: ${shape.reason}` };
+      if (!isHostAllowed(url, ctx.scope)) return outOfScope(url);
       const tab = await tabs.openTab(url);
       if (!tab.id) return { text: 'Error: the new tab could not be opened.' };
       return withObservation({ ...ctx, tabId: tab.id }, `Opened ${url} in a new tab.`, { newTabId: tab.id, settle: true });
@@ -302,6 +405,9 @@ async function execute(name: string, args: Record<string, unknown>, ctx: Execute
       const open = await tabs.listTabs();
       const target = index === null ? undefined : open[index];
       if (!target?.id) return { text: `Error: no tab at index ${index}. Call list_tabs to see what is open.` };
+      // A tab the user already has open is theirs; it joins the task's sites.
+      const host = target.url ? hostOf(target.url) : null;
+      if (host) ctx.scope.add(host);
       await tabs.focusTab(target.id);
       return withObservation({ ...ctx, tabId: target.id }, `Switched to "${target.title ?? target.url}".`, {
         newTabId: target.id,
@@ -313,7 +419,9 @@ async function execute(name: string, args: Record<string, unknown>, ctx: Execute
       if (!cues?.length) {
         return { text: 'No transcript is available for this tab. It may not be a YouTube video, or captions may be off.' };
       }
-      return { text: wrapUntrusted('transcript', formatTranscript(cues, 30000)) };
+      const rendered = formatTranscript(cues, 30000);
+      if (detectInjectionAttempt(rendered)) ctx.flags.add('prompt-injection-detected');
+      return { text: wrapUntrusted('transcript', rendered) };
     }
 
     case 'observe':
@@ -341,6 +449,23 @@ async function execute(name: string, args: Record<string, unknown>, ctx: Execute
 }
 
 /**
+ * A credential field ends the run. There is no confirmation to ask for: a dialog
+ * that offers to type the user's password is a credential-entry dialog with
+ * extra steps, and a page that talked the model into asking would be halfway
+ * there. The user signs in themselves and starts the task again.
+ */
+function credentialRefusal(ctx: ExecuteContext, ref: number, name: string, args: Record<string, unknown>): ExecuteOutcome {
+  const text = `Refused: [${ref}] is a password or payment field, and the agent never fills those.`;
+  ctx.emit({ kind: 'blocked', text, blockedReason: 'credential-field', toolName: name, toolArgs: args });
+  return {
+    text,
+    halt:
+      'Stopped: the task reached a password or payment field, which I will not fill in. ' +
+      'Sign in or enter the details yourself, then run the task again.',
+  };
+}
+
+/**
  * Pairs an action's outcome with a fresh observation. This is what keeps the
  * model oriented: it never acts on a stale element list because the newest one
  * arrives attached to the result of its last action.
@@ -361,20 +486,35 @@ async function withObservation(
     // a client-rendered page has finished drawing what the user will see.
     const settled = await tabs.settlePage(tabId).catch(() => null);
     if (settled && !settled.settled) {
-      notice = '\n\n[notice] The page was still changing when it was read; if an element you expect is missing, call observe again.';
+      notice += '\n\n[notice] The page was still changing when it was read; if an element you expect is missing, call observe again.';
     }
+  }
+
+  // A page can navigate itself, by script or by a button that is really a link.
+  // If that took the tab out of scope, step back before the model sees it.
+  const landed = await chrome.tabs.get(tabId).catch(() => null);
+  if (landed?.url && hostOf(landed.url) && !isHostAllowed(landed.url, ctx.scope)) {
+    const text = `Refused: the page navigated to ${hostOf(landed.url)}, which is outside this task's sites. Went back.`;
+    ctx.emit({ kind: 'blocked', text, blockedReason: 'off-origin' });
+    await tabs.goBack(tabId).catch(() => undefined);
+    notice += `\n\n[notice] ${text}`;
   }
 
   try {
     const observation = await tabs.observePage(tabId);
+    noteInjection(observation, ctx.flags);
     return {
       text: `${detail}${notice}\n\n${renderObservation(observation)}`,
       tabId,
       elements: observation.elements,
     };
   } catch (error) {
-    return { text: `${detail}\n\nCould not read the page afterwards: ${errorText(error)}`, tabId };
+    return { text: `${detail}${notice}\n\nCould not read the page afterwards: ${errorText(error)}`, tabId };
   }
+}
+
+function noteInjection(observation: Observation, flags: Set<string>): void {
+  if (detectInjectionAttempt(observation.text)) flags.add('prompt-injection-detected');
 }
 
 export function renderObservation(observation: Observation, label = 'Page now'): string {
@@ -384,7 +524,7 @@ export function renderObservation(observation: Observation, label = 'Page now'):
     `URL: ${observation.url} (${scroll})`,
     '',
     'Interactive elements:',
-    formatElements(observation.elements),
+    formatElements(observation.elements, hostOf(observation.url) ?? undefined),
     '',
     wrapUntrusted('page_text', observation.text),
   ].join('\n');

@@ -16,8 +16,9 @@
     </header>
 
     <p id="status" class="status" role="status"></p>
+    <p id="error" class="error-banner" role="alert" data-testid="qwen-error" hidden></p>
 
-    <main id="transcript" class="transcript" aria-live="polite"></main>
+    <main id="transcript" class="transcript" aria-live="polite" data-testid="qwen-messages"></main>
 
     <div id="confirm" class="confirm" hidden>
       <p id="confirm-text"></p>
@@ -33,11 +34,12 @@
         rows="2"
         placeholder="Ask about this page…"
         aria-label="Message"
+        data-testid="qwen-input"
       ></textarea>
       <div class="composer-actions">
         <span id="context-note" class="context-note"></span>
         <button id="stop" type="button" class="danger" hidden>Stop</button>
-        <button id="send" type="submit" class="primary">Send</button>
+        <button id="send" type="submit" class="primary" data-testid="qwen-send">Send</button>
       </div>
     </form>
 

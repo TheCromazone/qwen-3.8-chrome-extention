@@ -127,6 +127,10 @@ export interface InteractiveElement {
   role: string;
   name: string;
   value?: string;
+  /** Absolute http(s) destination for links, so a click can be scope-checked before it runs. */
+  href?: string;
+  /** Password and payment fields. The agent never types into these, whatever it is asked. */
+  sensitive?: boolean;
   /** Viewport-relative centre point, used for debugger-based input. */
   center: { x: number; y: number };
   inViewport: boolean;
@@ -148,10 +152,14 @@ export type AgentStepKind =
   | 'thinking'
   | 'tool_call'
   | 'tool_result'
+  | 'blocked'
   | 'message'
   | 'error'
   | 'done'
   | 'stopped';
+
+/** Why the harness refused an action the model asked for. */
+export type BlockedReason = 'off-origin' | 'credential-field' | 'needs-confirmation';
 
 export interface AgentStep {
   kind: AgentStepKind;
@@ -160,6 +168,7 @@ export interface AgentStep {
   text: string;
   toolName?: string;
   toolArgs?: Record<string, unknown>;
+  blockedReason?: BlockedReason;
   at: number;
 }
 
@@ -181,7 +190,11 @@ export interface Settings {
   keepAlive: string;
   /** Hard ceiling on agent loop iterations, so a runaway task still terminates. */
   maxSteps: number;
-  /** Characters of page text sent as context. */
+  /**
+   * Characters of page text sent per question. 0 means "size it from numCtx",
+   * which is the default: a flat cap is the one strategy guaranteed to drop a
+   * fact that sits near the bottom of a long page.
+   */
   pageCharBudget: number;
   /** Send screenshots to the model. Only honoured when the model reports vision. */
   useScreenshots: boolean;
@@ -199,7 +212,7 @@ export const DEFAULT_SETTINGS: Settings = {
   reasoningEffort: 'low',
   keepAlive: '30m',
   maxSteps: 30,
-  pageCharBudget: 24000,
+  pageCharBudget: 0,
   useScreenshots: true,
   useThinking: false,
   confirmRiskyActions: true,

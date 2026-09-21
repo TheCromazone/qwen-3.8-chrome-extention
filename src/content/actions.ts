@@ -3,7 +3,7 @@
  * `ref` from the element index, and every action dispatches the same event
  * sequence a real user would produce so framework-bound inputs update.
  */
-import { resolveRef } from './elements.ts';
+import { isSensitiveField, resolveRef } from './elements.ts';
 
 export interface ActionResult {
   ok: boolean;
@@ -59,6 +59,14 @@ export function clickRef(ref: number): ActionResult {
 export function typeIntoRef(ref: number, text: string, submit: boolean): ActionResult {
   const el = resolveRef(ref);
   if (!el) return missing(ref);
+
+  // Checked here against the live node as well as in the agent, so it holds
+  // even if the element index the model saw was stale or wrong.
+  if (isSensitiveField(el)) {
+    return fail(
+      `Refused: [${ref}] is a password or payment field. The agent never fills these; the user has to do that themselves.`,
+    );
+  }
 
   scrollIntoView(el);
   const target = el as HTMLElement;

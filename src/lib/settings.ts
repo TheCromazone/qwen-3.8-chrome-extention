@@ -39,12 +39,9 @@ export function coerceSettings(input: unknown): Settings {
       raw.reasoningEffort === 'low' || raw.reasoningEffort === 'medium' || raw.reasoningEffort === 'high'
         ? raw.reasoningEffort
         : DEFAULT_SETTINGS.reasoningEffort,
-    keepAlive:
-      typeof raw.keepAlive === 'string' && /^\d+(\.\d+)?(ms|s|m|h)?$|^-1$/.test(raw.keepAlive.trim())
-        ? raw.keepAlive.trim()
-        : DEFAULT_SETTINGS.keepAlive,
+    keepAlive: coerceKeepAlive(raw.keepAlive),
     maxSteps: Math.round(clampNumber(raw.maxSteps, 1, 200, DEFAULT_SETTINGS.maxSteps)),
-    pageCharBudget: Math.round(clampNumber(raw.pageCharBudget, 1000, 200000, DEFAULT_SETTINGS.pageCharBudget)),
+    pageCharBudget: coercePageBudget(raw.pageCharBudget),
     useScreenshots: typeof raw.useScreenshots === 'boolean' ? raw.useScreenshots : DEFAULT_SETTINGS.useScreenshots,
     useThinking: typeof raw.useThinking === 'boolean' ? raw.useThinking : DEFAULT_SETTINGS.useThinking,
     confirmRiskyActions:
@@ -52,6 +49,29 @@ export function coerceSettings(input: unknown): Settings {
         ? raw.confirmRiskyActions
         : DEFAULT_SETTINGS.confirmRiskyActions,
   };
+}
+
+/** 0 is "automatic"; anything else must be a usable cap. */
+function coercePageBudget(value: unknown): number {
+  const n = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.round(Math.min(400000, Math.max(1000, n)));
+}
+
+/** Ollama accepts durations ("30m") or seconds as a number; -1 means never unload. */
+function coerceKeepAlive(value: unknown): string {
+  const text = typeof value === 'number' ? String(value) : typeof value === 'string' ? value.trim() : '';
+  return /^-?\d+(\.\d+)?(ms|s|m|h)?$/.test(text) ? text : DEFAULT_SETTINGS.keepAlive;
+}
+
+/**
+ * The page-text budget actually used. Roughly 3 characters per token is a safe
+ * floor for prose, and three quarters of the window leaves room for the prompt,
+ * the conversation and the answer.
+ */
+export function resolvePageBudget(settings: Settings): number {
+  if (settings.pageCharBudget > 0) return settings.pageCharBudget;
+  return Math.min(400000, Math.floor(settings.numCtx * 3 * 0.75));
 }
 
 function clampNumber(value: unknown, min: number, max: number, fallback: number): number {

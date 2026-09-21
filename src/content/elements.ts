@@ -75,6 +75,8 @@ export function indexInteractiveElements(doc: Document, limit = 150): Interactiv
       role: inferRole(el),
       name: name.slice(0, 160),
       value: readValue(el),
+      href: resolvedHref(el),
+      sensitive: isSensitiveField(el) || undefined,
       center: { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 },
       inViewport:
         rect.top < viewportHeight && rect.top + rect.height > 0 && rect.left < viewportWidth && rect.left + rect.width > 0,
@@ -142,6 +144,35 @@ function cssEscape(value: string): string {
   return value.replace(/["\\]/g, '\\$&');
 }
 
+/** The absolute destination of a link, when it is an ordinary web URL. */
+function resolvedHref(el: Element): string | undefined {
+  const raw = el.getAttribute('href');
+  if (!raw || el.tagName !== 'A') return undefined;
+  try {
+    const url = new URL(raw, el.ownerDocument.baseURI);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+const SENSITIVE_AUTOCOMPLETE = new Set([
+  'current-password', 'new-password', 'one-time-code', 'cc-number', 'cc-csc', 'cc-exp', 'cc-exp-month', 'cc-exp-year',
+]);
+
+/**
+ * Fields the agent must never fill: passwords and payment details. Checked
+ * against the live node, not the model's description of it, so a stale index
+ * or a persuasive page cannot get around it.
+ */
+export function isSensitiveField(el: Element): boolean {
+  if (el.tagName !== 'INPUT') return false;
+  const type = (el.getAttribute('type') ?? 'text').toLowerCase();
+  if (type === 'password') return true;
+  const autocomplete = (el.getAttribute('autocomplete') ?? '').toLowerCase().trim();
+  return SENSITIVE_AUTOCOMPLETE.has(autocomplete);
+}
+
 function inferRole(el: Element): string {
   const explicit = el.getAttribute('role');
   if (explicit) return explicit;
@@ -152,6 +183,7 @@ function inferRole(el: Element): string {
   if (tag === 'textarea') return 'textbox';
   if (tag === 'input') {
     const type = (el.getAttribute('type') ?? 'text').toLowerCase();
+    if (type === 'password') return 'password';
     if (type === 'checkbox' || type === 'radio') return type;
     if (type === 'submit' || type === 'button' || type === 'reset') return 'button';
     if (type === 'range') return 'slider';
@@ -177,18 +209,32 @@ function isDisabled(el: Element): boolean {
   return 'disabled' in el && Boolean((el as { disabled?: boolean }).disabled);
 }
 
-/** Renders the index into the compact listing the model reads. */
-export function formatElements(elements: InteractiveElement[]): string {
+/**
+ * Renders the index into the compact listing the model reads. Links that leave
+ * the current site say so, so the model can tell a same-site step from an exit.
+ */
+export function formatElements(elements: InteractiveElement[], pageHost?: string): string {
   if (!elements.length) return '(no interactive elements found)';
   return elements
     .map((el) => {
+      const linkHost = el.href ? safeHost(el.href) : null;
       const flags = [
         el.inViewport ? null : 'offscreen',
         el.disabled ? 'disabled' : null,
+        el.sensitive ? 'sensitive: never filled by the agent' : null,
         el.value ? `value="${el.value}"` : null,
+        linkHost && pageHost && linkHost !== pageHost ? `leaves site: ${linkHost}` : null,
       ].filter(Boolean);
       const suffix = flags.length ? ` [${flags.join(', ')}]` : '';
       return `[${el.ref}] ${el.role} "${el.name || '(unlabelled)'}"${suffix}`;
     })
     .join('\n');
+}
+
+function safeHost(url: string): string | null {
+  try {
+    return new URL(url).host.toLowerCase().replace(/^www\./, '');
+  } catch {
+    return null;
+  }
 }

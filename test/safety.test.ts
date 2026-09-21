@@ -4,11 +4,14 @@ import {
   assessClick,
   assessNavigation,
   assessTyping,
+  buildScope,
   detectInjectionAttempt,
+  extractHostsFromText,
   isBlockedUrl,
+  isHostAllowed,
   wrapUntrusted,
 } from '../src/lib/safety.ts';
-import { coerceSettings } from '../src/lib/settings.ts';
+import { coerceSettings, resolvePageBudget } from '../src/lib/settings.ts';
 import { argBool, argInt, argString, coerceArgs, describeTools, agentTools } from '../src/lib/tools.ts';
 import { DEFAULT_SETTINGS, type InteractiveElement } from '../src/lib/types.ts';
 
@@ -57,19 +60,45 @@ describe('assessTyping', () => {
 });
 
 describe('assessNavigation', () => {
-  test('allows staying on the same host', () => {
-    assert.equal(assessNavigation('https://example.test/b', 'https://example.test/a').risky, false);
-  });
-
-  test('gates leaving the current site', () => {
-    const assessment = assessNavigation('https://elsewhere.test/', 'https://example.test/a');
-    assert.equal(assessment.risky, true);
-    assert.match(assessment.reason, /example\.test.*elsewhere\.test/);
+  test('accepts an ordinary web URL', () => {
+    assert.equal(assessNavigation('https://example.test/b').risky, false);
   });
 
   test('rejects non-http schemes and malformed URLs', () => {
-    assert.equal(assessNavigation('javascript:alert(1)', 'https://example.test').risky, true);
-    assert.equal(assessNavigation('not a url', 'https://example.test').risky, true);
+    assert.equal(assessNavigation('javascript:alert(1)').risky, true);
+    assert.equal(assessNavigation('not a url').risky, true);
+  });
+});
+
+describe('task scope', () => {
+  test('extracts hosts the user wrote as URLs or bare domains', () => {
+    const hosts = extractHostsFromText('Compare prices on amazon.com and https://www.bestbuy.com/laptops, e.g. the 3.8 model');
+    assert.deepEqual(hosts.sort(), ['amazon.com', 'bestbuy.com']);
+  });
+
+  test('extracts an IP and port, which is what a local fixture looks like', () => {
+    assert.deepEqual(extractHostsFromText('open 127.0.0.1:8731'), ['127.0.0.1:8731']);
+  });
+
+  test('a scope is the starting site plus what the task names plus explicit extras', () => {
+    const scope = buildScope('https://www.shop.test/start', 'check reviews on reviews.example', ['https://cdn.other.test']);
+    assert.deepEqual([...scope].sort(), ['cdn.other.test', 'reviews.example', 'shop.test']);
+  });
+
+  test('allows the same site, its subdomains and www, and nothing else', () => {
+    const scope = buildScope('https://shop.test/', '', []);
+    assert.equal(isHostAllowed('https://shop.test/boots', scope), true);
+    assert.equal(isHostAllowed('https://www.shop.test/boots', scope), true);
+    assert.equal(isHostAllowed('https://checkout.shop.test/', scope), true);
+    assert.equal(isHostAllowed('https://elsewhere.example/partners', scope), false);
+    assert.equal(isHostAllowed('https://shop.test.evil.example/', scope), false, 'a suffix match is not a subdomain');
+    assert.equal(isHostAllowed('javascript:alert(1)', scope), false);
+  });
+
+  test('ports distinguish local fixtures', () => {
+    const scope = buildScope('http://127.0.0.1:8731/', '', []);
+    assert.equal(isHostAllowed('http://127.0.0.1:8731/login', scope), true);
+    assert.equal(isHostAllowed('http://127.0.0.1:9999/', scope), false);
   });
 });
 
@@ -106,11 +135,24 @@ describe('coerceSettings', () => {
   });
 
   test('clamps numbers into a usable range', () => {
-    const settings = coerceSettings({ numCtx: 10, maxSteps: 9999, temperature: 12, pageCharBudget: -5 });
+    const settings = coerceSettings({ numCtx: 10, maxSteps: 9999, temperature: 12, pageCharBudget: 500 });
     assert.equal(settings.numCtx, 2048);
     assert.equal(settings.maxSteps, 200);
     assert.equal(settings.temperature, 2);
     assert.equal(settings.pageCharBudget, 1000);
+  });
+
+  test('a page budget of 0 means automatic, sized from the context window', () => {
+    assert.equal(coerceSettings({ pageCharBudget: 0 }).pageCharBudget, 0);
+    assert.equal(coerceSettings({ pageCharBudget: -5 }).pageCharBudget, 0);
+    const auto = resolvePageBudget(coerceSettings({ numCtx: 65536, pageCharBudget: 0 }));
+    assert.ok(auto > 62584, `a 62k page must fit whole at 64k context, budget was ${auto}`);
+    assert.equal(resolvePageBudget(coerceSettings({ numCtx: 65536, pageCharBudget: 24000 })), 24000, 'an explicit cap is honoured');
+  });
+
+  test('accepts keep-alive as a number, the way the gauntlet writes it', () => {
+    assert.equal(coerceSettings({ keepAlive: -1 }).keepAlive, '-1');
+    assert.equal(coerceSettings({ keepAlive: 300 }).keepAlive, '300');
   });
 
   test('rejects a nonsense reasoning effort and keep-alive', () => {

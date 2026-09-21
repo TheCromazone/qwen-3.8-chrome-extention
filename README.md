@@ -18,7 +18,13 @@ answer into the side panel. No clicking, no loop; it should feel immediate.
 **Agent** — you describe a task and it works the page: clicking, typing,
 scrolling, following links, opening tabs, reading transcripts. Every step is
 shown live in the side panel and there is a Stop button that takes effect
-immediately.
+immediately. A task stays on the site it started on unless you name another
+site in the task ("compare this with the same boot on amazon.com"), which is
+how you tell it where it is allowed to go.
+
+Ask mode also knows about your other tabs: ask "which of my open tabs is the
+better deal" and it reads each one and answers with the contents attributed to
+their titles, the way Chrome's own assistant does.
 
 ## Requirements
 
@@ -108,25 +114,42 @@ three. They are exposed in settings if you want to tune them:
 | Setting | Default here | Why |
 | --- | --- | --- |
 | Context window | 65,536 | Ollama caps context at 4,096 regardless of what the model supports, which silently truncates long pages. Lower this if the model spills out of VRAM. |
+| Page text per question | automatic | Sized from the context window (about 147,000 characters at 64k), so a whole long page reaches the model. A flat cap is the one strategy guaranteed to drop a fact near the bottom of a page. |
 | Reasoning effort | Low | Qwen3.8 ships at its highest effort and overthinks routine browsing steps badly. |
 | Keep model loaded | 30m | Ollama unloads the model after 5 minutes idle, making the next question slow to start. |
 
 Also worth knowing:
 
-- **Page text per question** (24,000 characters) is trimmed from the middle, not
-  the end, so a page's conclusions survive.
+- When a page does exceed the budget it is trimmed from the middle, not the
+  end, so its conclusions survive.
 - **Maximum agent steps** (30) is a hard stop, so a confused run always
   terminates. It usually stops sooner: three actions in a row that leave the
   page unchanged end the run rather than grinding through the remaining steps.
-- **Ask before buying, sending, deleting or leaving the current site** is on by
-  default. Leave it on — see below.
+- **Ask before buying, sending, deleting or submitting** is on by default. Leave
+  it on — see below. An unanswered prompt is declined after a minute, so a run
+  never hangs on it.
 
 ## Safety
 
-The agent asks before anything consequential: clicking something that reads as a
-purchase, a send, or a delete; submitting a form that is not a search; and
-leaving the site it is on. It refuses outright to drive `chrome://` pages, other
-extensions, or local files.
+Three rules are enforced in code and cannot be switched off:
+
+- **A task is fenced to its sites.** The site it started on, plus any site you
+  named in the task. A link, a `navigate`, or a page that redirects itself
+  anywhere else is refused and recorded, and the agent is told to carry on or
+  finish and say which site it needed. It is refused rather than asked about on
+  purpose: a confirmation that pops up mid-task with a destination the page
+  supplied is exactly how prompt injection succeeds in practice, because people
+  click Allow. If a task genuinely needs another site, say so in the task.
+- **Password and payment fields are never filled.** Whatever the model was told,
+  by you or by the page. The run ends there and asks you to sign in yourself.
+  This is checked against the live field in the page as well as in the agent,
+  so a stale or misleading element list cannot get around it.
+- **Browser-internal pages are off limits.** `chrome://`, other extensions,
+  local files.
+
+And one that asks: clicking something that reads as a purchase, a send, a
+delete, or a confirmation, or submitting a form that is not a search, waits for
+you — with silence counting as no after a minute.
 
 Those checks live in the extension, not in the prompt. A local Qwen has none of
 the prompt-injection training the hosted assistants have, and every page it reads
@@ -138,6 +161,13 @@ model's context.
 
 This reduces the risk; it does not eliminate it. Don't turn the confirmations off
 on a site where a mistake costs money.
+
+## What the panel remembers
+
+Each run's steps are written to the extension's session storage as they happen,
+so closing and reopening the side panel shows the last run rather than a blank
+pane. A task only keeps *running* while the panel is open, though; if you close
+it mid-task, you will see how far it got and can start again.
 
 ## Development
 
@@ -158,6 +188,11 @@ The behaviour against the real model still has to be checked by hand.
 
 `npm run build` also regenerates nothing by hand: run `node scripts/make-icons.mjs`
 if you want to change the icon.
+
+There is a QA gauntlet on the `qa/ask-gemini-gauntlet` branch that drives the
+built extension through mocked pages against a scripted model. Its test bridge
+(`window.__qwenGauntlet`) only exists when `chrome.storage.local` contains
+`{ gauntlet: true }`; in ordinary use it is not defined.
 
 ## How it works
 

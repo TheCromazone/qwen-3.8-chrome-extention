@@ -22,6 +22,8 @@ export interface FakeChromeOptions {
   /** URL -> HTML, so navigation can land on a different page. */
   pages: Record<string, string>;
   startUrl: string;
+  /** Further tabs open in the same window, by URL. */
+  extraTabs?: string[];
   screenshot?: string;
 }
 
@@ -31,12 +33,17 @@ export interface FakeChrome {
   restore: () => void;
 }
 
+/** What Chrome reports as a loaded tab's title, without mounting the page. */
+function titleOf(html: string): string {
+  return /<title>([^<]*)<\/title>/i.exec(html)?.[1]?.trim() ?? '';
+}
+
 export function installFakeChrome(options: FakeChromeOptions): FakeChrome {
   const tabs: FakeTab[] = [
     {
       id: 1,
       url: options.startUrl,
-      title: '',
+      title: titleOf(options.pages[options.startUrl] ?? ''),
       windowId: 10,
       status: 'complete',
       active: true,
@@ -47,6 +54,14 @@ export function installFakeChrome(options: FakeChromeOptions): FakeChrome {
   let nextTabId = 2;
   let dom: DomHandle | null = null;
   let mountedTabId: number | null = null;
+  const historyOf = new Map<number, string[]>();
+  const local: Record<string, unknown> = {};
+  const session: Record<string, unknown> = {};
+
+  for (const url of options.extraTabs ?? []) {
+    const html = options.pages[url] ?? `<html><head><title>Not found</title></head><body>No page at ${url}</body></html>`;
+    tabs.push({ id: nextTabId++, url, title: titleOf(html), windowId: 10, status: 'complete', active: false, html });
+  }
 
   /** Swaps the live jsdom document to the given tab's page. */
   const mount = (tab: FakeTab) => {
@@ -64,8 +79,10 @@ export function installFakeChrome(options: FakeChromeOptions): FakeChrome {
   };
 
   const navigate = (tab: FakeTab, url: string) => {
+    historyOf.set(tab.id, [...(historyOf.get(tab.id) ?? []), tab.url]);
     tab.url = url;
     tab.html = options.pages[url] ?? `<html><head><title>Not found</title></head><body>No page at ${url}</body></html>`;
+    tab.title = titleOf(tab.html);
     // Force a remount so the next observation sees the new document.
     if (mountedTabId === tab.id) {
       dom?.restore();
@@ -98,11 +115,23 @@ export function installFakeChrome(options: FakeChromeOptions): FakeChrome {
         }
         return { ...tab };
       },
+      async goBack(id: number) {
+        const tab = tabById(id);
+        const previous = historyOf.get(id)?.pop();
+        if (!previous) return;
+        tab.url = previous;
+        tab.html = options.pages[previous] ?? '<html><body>Not found</body></html>';
+        if (mountedTabId === id) {
+          dom?.restore();
+          dom = null;
+          mountedTabId = null;
+        }
+      },
       async create(props: { url: string }) {
         const tab: FakeTab = {
           id: nextTabId++,
           url: props.url,
-          title: '',
+          title: titleOf(options.pages[props.url] ?? ''),
           windowId: 10,
           status: 'complete',
           active: true,
@@ -116,8 +145,9 @@ export function installFakeChrome(options: FakeChromeOptions): FakeChrome {
         const tab = tabById(id);
         mount(tab);
 
-        // jsdom does not follow links, so resolve the click target's href
-        // before acting and drive the fake tab's navigation ourselves.
+        // jsdom does not follow links or run inline scripts, so resolve where a
+        // click would go — an anchor's href, or a `data-nav` attribute standing
+        // in for a script that sets location — and drive the navigation ourselves.
         const href =
           message.command === 'act' && message.action.kind === 'click'
             ? hrefOf(resolveRef(message.action.ref))
@@ -142,12 +172,31 @@ export function installFakeChrome(options: FakeChromeOptions): FakeChrome {
         },
         async set() {},
       },
+      local: {
+        async get(key: string) {
+          return { [key]: local[key] };
+        },
+        async set(values: Record<string, unknown>) {
+          Object.assign(local, values);
+        },
+      },
+      session: {
+        async get(key: string) {
+          return { [key]: session[key] };
+        },
+        async set(values: Record<string, unknown>) {
+          Object.assign(session, values);
+        },
+        async remove(key: string) {
+          delete session[key];
+        },
+      },
       onChanged: { addListener() {} },
     },
   };
 
   function hrefOf(element: Element | null): string | null {
-    const href = element?.getAttribute('href');
+    const href = element?.getAttribute('href') ?? element?.getAttribute('data-nav');
     if (!href || href.startsWith('#') || href.startsWith('javascript:')) return null;
     try {
       return new URL(href, tabById(mountedTabId ?? 1).url).toString();

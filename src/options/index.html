@@ -61,7 +61,11 @@
         <h2>Pages and tasks</h2>
 
         <label for="pageCharBudget">Page text sent per question (characters)</label>
-        <input id="pageCharBudget" type="number" min="1000" max="200000" step="1000" />
+        <input id="pageCharBudget" type="number" min="0" max="400000" step="1000" />
+        <p class="hint">
+          0 sizes it from the context window (about 147,000 characters at 64k), so a whole long
+          page reaches the model. Set a number only if you want a hard cap.
+        </p>
 
         <label for="maxSteps">Maximum agent steps</label>
         <input id="maxSteps" type="number" min="1" max="200" step="1" />
@@ -79,11 +83,12 @@
 
         <label class="checkbox">
           <input id="confirmRiskyActions" type="checkbox" />
-          Ask before buying, sending, deleting or leaving the current site
+          Ask before buying, sending, deleting or submitting a form
         </label>
         <p class="hint">
-          Strongly recommended. A local model has no injection-resistance training, and pages it
-          reads can contain text written to redirect it.
+          Strongly recommended. An unanswered prompt is declined after a minute. Separately, and
+          not switchable, a task is fenced to the site it started on plus any site you name in the
+          task, and the agent never types into password or payment fields.
         </p>
       </section>
 

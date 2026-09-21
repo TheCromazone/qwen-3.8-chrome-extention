@@ -90,6 +90,35 @@ body {
 .status:not(:empty) { padding: 8px 12px; }
 .status.is-error { color: var(--danger); }
 
+.error-banner {
+  margin: 0 12px 8px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--danger);
+  background: var(--tool-bg);
+  color: var(--danger);
+  font-size: 13px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.divider {
+  text-align: center;
+  font-size: 11px;
+  color: var(--muted);
+  border-top: 1px solid var(--line);
+  line-height: 0;
+  margin: 8px 0;
+}
+
+.divider::before {
+  content: attr(data-empty);
+}
+
+.step.is-blocked {
+  border-left: 3px solid var(--warn-line);
+  color: var(--fg);
+}
+
 .transcript {
   flex: 1;
   overflow-y: auto;
