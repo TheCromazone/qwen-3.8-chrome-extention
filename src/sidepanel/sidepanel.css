@@ -1,0 +1,232 @@
+:root {
+  --bg: #ffffff;
+  --fg: #1b1b1f;
+  --muted: #5f6368;
+  --line: #e3e3e7;
+  --accent: #3b5bdb;
+  --accent-fg: #ffffff;
+  --user-bg: #eef1fb;
+  --tool-bg: #f5f5f7;
+  --danger: #b3261e;
+  --warn-bg: #fff4e5;
+  --warn-line: #f0b429;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #17181c;
+    --fg: #e6e6ea;
+    --muted: #a0a3ab;
+    --line: #2c2e35;
+    --accent: #7b92ff;
+    --accent-fg: #0f1013;
+    --user-bg: #23283a;
+    --tool-bg: #1e2026;
+    --danger: #f2b8b5;
+    --warn-bg: #2d2413;
+    --warn-line: #f0b429;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--bg);
+  color: var(--fg);
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.modes { display: flex; gap: 4px; }
+
+.mode {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  padding: 5px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  font: inherit;
+}
+
+.mode.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+}
+
+.icon-button {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 18px;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+
+.icon-button:hover { background: var(--tool-bg); }
+
+.status {
+  margin: 0;
+  padding: 0 12px;
+  color: var(--muted);
+  font-size: 12px;
+  min-height: 0;
+}
+
+.status:not(:empty) { padding: 8px 12px; }
+.status.is-error { color: var(--danger); }
+
+.error-banner {
+  margin: 0 12px 8px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--danger);
+  background: var(--tool-bg);
+  color: var(--danger);
+  font-size: 13px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.divider {
+  text-align: center;
+  font-size: 11px;
+  color: var(--muted);
+  border-top: 1px solid var(--line);
+  line-height: 0;
+  margin: 8px 0;
+}
+
+.divider::before {
+  content: attr(data-empty);
+}
+
+.step.is-blocked {
+  border-left: 3px solid var(--warn-line);
+  color: var(--fg);
+}
+
+.transcript {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.msg { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.msg.user {
+  background: var(--user-bg);
+  padding: 8px 10px;
+  border-radius: 10px;
+  align-self: flex-end;
+  max-width: 90%;
+}
+
+.msg.assistant { padding: 2px 0; }
+
+.msg.error {
+  color: var(--danger);
+  border-left: 3px solid var(--danger);
+  padding-left: 8px;
+}
+
+.step {
+  background: var(--tool-bg);
+  border-radius: 8px;
+  padding: 6px 9px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.step .step-label {
+  font-weight: 600;
+  color: var(--fg);
+  display: block;
+  margin-bottom: 2px;
+}
+
+.step details summary { cursor: pointer; }
+.step pre {
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.confirm {
+  margin: 0 12px 8px;
+  padding: 10px;
+  border: 1px solid var(--warn-line);
+  background: var(--warn-bg);
+  border-radius: 8px;
+}
+
+.confirm p { margin: 0 0 8px; }
+.confirm-actions { display: flex; gap: 8px; }
+
+.composer {
+  border-top: 1px solid var(--line);
+  padding: 8px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 44px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+}
+
+.composer-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.context-note {
+  flex: 1;
+  font-size: 11px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+button.primary, button.danger, .confirm-actions button {
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--fg);
+  padding: 6px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  font: inherit;
+}
+
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+button.danger { color: var(--danger); }
+button:disabled { opacity: 0.5; cursor: default; }
