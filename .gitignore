@@ -1,0 +1,6 @@
+node_modules/
+
+# The worktree scripts/loop.js checks the branch under test out into, so the
+# gauntlet can run against a build without disturbing this checkout. It is a
+# scratch directory, rebuilt on every loop iteration.
+.gauntlet-worktree/
