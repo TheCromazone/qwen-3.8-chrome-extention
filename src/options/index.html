@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Qwen Browser Agent settings</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Qwen Browser Agent</h1>
+
+      <section>
+        <h2>Ollama</h2>
+
+        <label for="ollamaUrl">Server URL</label>
+        <input id="ollamaUrl" type="url" spellcheck="false" />
+        <p class="hint">
+          Ollama must allow this extension as an origin. Set
+          <code>OLLAMA_ORIGINS</code> to <code>chrome-extension://*</code> before starting it —
+          see the README for the exact command on Windows and macOS.
+        </p>
+
+        <label for="model">Model</label>
+        <input id="model" list="model-options" spellcheck="false" />
+        <datalist id="model-options"></datalist>
+
+        <div class="row">
+          <button id="test" type="button">Test connection</button>
+          <span id="probe" class="probe"></span>
+        </div>
+      </section>
+
+      <section>
+        <h2>Generation</h2>
+
+        <label for="numCtx">Context window (tokens)</label>
+        <input id="numCtx" type="number" min="2048" max="262144" step="1024" />
+        <p class="hint">
+          Ollama caps context at 4096 unless this is set, which quietly truncates long pages.
+          64k suits a 32&nbsp;GB card; lower it if the model spills out of VRAM.
+        </p>
+
+        <label for="reasoningEffort">Reasoning effort</label>
+        <select id="reasoningEffort">
+          <option value="low">Low — fastest, best for browsing steps</option>
+          <option value="medium">Medium</option>
+          <option value="high">High — slowest</option>
+        </select>
+        <p class="hint">Qwen3.8 ships at the highest effort and overthinks routine steps.</p>
+
+        <label for="temperature">Temperature</label>
+        <input id="temperature" type="number" min="0" max="2" step="0.05" />
+
+        <label for="keepAlive">Keep model loaded for</label>
+        <input id="keepAlive" spellcheck="false" placeholder="30m" />
+        <p class="hint">Ollama unloads after 5 minutes idle, which makes the next question slow to start.</p>
+      </section>
+
+      <section>
+        <h2>Pages and tasks</h2>
+
+        <label for="pageCharBudget">Page text sent per question (characters)</label>
+        <input id="pageCharBudget" type="number" min="1000" max="200000" step="1000" />
+
+        <label for="maxSteps">Maximum agent steps</label>
+        <input id="maxSteps" type="number" min="1" max="200" step="1" />
+
+        <label class="checkbox">
+          <input id="useScreenshots" type="checkbox" />
+          Send screenshots when the page text is not enough
+        </label>
+        <p class="hint" id="vision-hint">Only used if the model reports image support.</p>
+
+        <label class="checkbox">
+          <input id="useThinking" type="checkbox" />
+          Show the model's reasoning in the side panel
+        </label>
+
+        <label class="checkbox">
+          <input id="confirmRiskyActions" type="checkbox" />
+          Ask before buying, sending, deleting or leaving the current site
+        </label>
+        <p class="hint">
+          Strongly recommended. A local model has no injection-resistance training, and pages it
+          reads can contain text written to redirect it.
+        </p>
+      </section>
+
+      <div class="row sticky">
+        <button id="save" type="button" class="primary">Save</button>
+        <button id="reset" type="button">Reset to defaults</button>
+        <span id="saved" class="saved" role="status"></span>
+      </div>
+    </main>
+
+    <script type="module" src="options.js"></script>
+  </body>
+</html>
