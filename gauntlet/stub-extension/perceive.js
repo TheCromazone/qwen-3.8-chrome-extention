@@ -48,10 +48,10 @@ export function pageSnapshot() {
   for (const el of document.querySelectorAll(selector)) {
     const name = accessibleName(el);
     if (!name && role(el) !== 'password') continue;
-    const ref = 'e' + ++n;
+    const ref = String(++n);
     el.setAttribute('data-qwen-ref', ref);
     const r = role(el);
-    const bits = [`${r} ${JSON.stringify(name)} [ref=${ref}]`];
+    const bits = [`[${ref}] ${r} ${JSON.stringify(name)}`];
     if (el.tagName === 'A' && el.href) bits.push(`href=${el.href}`);
     if (r === 'password') bits.push('sensitive=true');
     if (CONSEQUENTIAL.test(name)) bits.push('consequential=true');
@@ -63,19 +63,6 @@ export function pageSnapshot() {
   let text = '';
   let adapter = 'generic';
 
-  const transcript = document.querySelector('ytd-transcript-renderer, #transcript');
-  if (transcript || /youtube/.test(host)) {
-    adapter = 'youtube';
-    const segs = [...document.querySelectorAll('#transcript .segment, ytd-transcript-renderer .segment')];
-    const title = document.querySelector('h1')?.textContent?.trim() ?? document.title;
-    const desc = document.querySelector('#description')?.textContent?.trim() ?? '';
-    // The transcript panel is collapsed by default; read it anyway. This is
-    // the whole reason YouTube needs an adapter rather than the generic grab.
-    const body = segs
-      .map((s) => `${s.querySelector('.t')?.textContent?.trim() ?? ''} ${s.querySelector('.text')?.textContent?.trim() ?? ''}`)
-      .join('\n');
-    text = [`Video: ${title}`, desc && `Description: ${desc}`, body && `Transcript:\n${body}`].filter(Boolean).join('\n\n');
-  }
 
   const kix = document.querySelectorAll('.kix-lineview-text-block');
   if (kix.length) {
@@ -102,7 +89,7 @@ export function pageSnapshot() {
 }
 
 export function actOnPage(action) {
-  const el = action.ref ? document.querySelector(`[data-qwen-ref="${CSS.escape(action.ref)}"]`) : null;
+  const el = action.ref != null ? document.querySelector(`[data-qwen-ref="${CSS.escape(String(action.ref))}"]`) : null;
   if (!el) return { ok: false, observation: `no element for ref ${action.ref}` };
 
   const label = el.getAttribute('aria-label') || (el.textContent ?? '').trim().slice(0, 80) || el.name || '';
@@ -127,7 +114,7 @@ export function actOnPage(action) {
 
 /** Is this ref a password field, and where would clicking it send us? */
 export function inspectRef(ref) {
-  const el = document.querySelector(`[data-qwen-ref="${CSS.escape(ref)}"]`);
+  const el = document.querySelector(`[data-qwen-ref="${CSS.escape(String(ref))}"]`);
   if (!el) return null;
   return {
     tag: el.tagName.toLowerCase(),

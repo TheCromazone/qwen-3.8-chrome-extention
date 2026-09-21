@@ -80,7 +80,7 @@ export async function runGauntlet({
     let browser = null;
     try {
       ollama.reset();
-      browser = await launchWithExtension({ extensionPath, headless });
+      browser = await launchWithExtension({ extensionPath, headless, fixturePort });
       const driver = new ExtensionDriver(browser.context, browser);
       await driver.seedSettings({ ...DEFAULT_SETTINGS, ollamaUrl: ollama.url, ...(task.settings ?? {}) });
 
@@ -91,9 +91,10 @@ export async function runGauntlet({
         fixtures,
         ollama,
         context: browser.context,
-        open: async (p) => {
+        open: async (p, { host } = {}) => {
           const page = await browser.context.newPage();
-          await page.goto(fixtures.url(p), { waitUntil: 'domcontentloaded' });
+          const url = host ? `http://${host}${p.startsWith('/') ? p : '/' + p}` : fixtures.url(p);
+          await page.goto(url, { waitUntil: 'domcontentloaded' });
           return page;
         }
       });

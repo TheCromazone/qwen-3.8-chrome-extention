@@ -22,13 +22,15 @@ export default [
       if (mode === 'mock') {
         ollama.setScript([], { content: 'He builds a hydraulic press from scrap, rated at twenty tonnes.' });
       }
-      await open('/youtube/watch.html');
+      await open('/watch?v=carrow1', { host: 'www.youtube.com' });
       await driver.openPanel();
 
       const { answer } = await driver.ask('What is he building in this video, and what is it rated at?');
       const prompt = ollama.requests.at(-1).promptText;
 
       // Lines that exist only inside the transcript panel.
+      // Neither line is in the page DOM — both exist only in the caption
+      // track, so seeing them means the adapter actually ran.
       checkIncludes(prompt, 'off a scrapped gantry crane', 'the prompt (transcript body)');
       checkIncludes(prompt, 'borrowed from the university', 'the prompt (transcript body)');
       check(
@@ -51,7 +53,7 @@ export default [
           content: '1. Twenty tonnes.\n2. Off a forklift mast.\n3. Four hundred and twenty pounds.'
         });
       }
-      await open('/youtube/watch.html');
+      await open('/watch?v=carrow1', { host: 'www.youtube.com' });
       await driver.openPanel();
 
       const question =
@@ -84,7 +86,7 @@ export default [
       if (mode === 'mock') {
         ollama.setScript([], { content: 'He gets to calibration at 4:10.' });
       }
-      await open('/youtube/watch.html');
+      await open('/watch?v=carrow1', { host: 'www.youtube.com' });
       await driver.openPanel();
 
       const { answer } = await driver.ask('When does he talk about calibration?');

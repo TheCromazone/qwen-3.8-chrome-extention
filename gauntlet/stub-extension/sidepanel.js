@@ -4,6 +4,7 @@
 // every gauntlet pass condition, so that a red gauntlet against the real build
 // means the build has a problem and not the harness.
 import { pageSnapshot, actOnPage, inspectRef } from './perceive.js';
+import { isWatchPage, fetchTranscript, formatTranscript } from './youtube.js';
 
 const DEFAULTS = {
   ollamaUrl: 'http://127.0.0.1:11434',
@@ -37,12 +38,27 @@ const storage = {
 
 // ---------------------------------------------------------------- ollama ---
 
-function requestBody(messages, { images = [], stream = true } = {}) {
+/** The agent's tool surface. A closed vocabulary; the model picks from it. */
+const TOOLS = [
+  fn('click', 'Click an element from the observation, by its number.', { ref: { type: 'integer' } }, ['ref']),
+  fn('type_text', 'Type into a text box.', { ref: { type: 'integer' }, text: { type: 'string' }, submit: { type: 'boolean' } }, ['ref', 'text']),
+  fn('navigate', 'Go to a URL in the current tab.', { url: { type: 'string' } }, ['url']),
+  fn('take_screenshot', 'Capture what the page looks like right now.', {}),
+  fn('press_key', 'Press a single key.', { key: { type: 'string' } }, ['key']),
+  fn('finish', 'End the task with the answer.', { summary: { type: 'string' } }, ['summary'])
+];
+
+function fn(name, description, properties, required = []) {
+  return { type: 'function', function: { name, description, parameters: { type: 'object', properties, required } } };
+}
+
+function requestBody(messages, { images = [], stream = true, tools = null } = {}) {
   const msgs = messages.map((m) => ({ ...m }));
   if (images.length) msgs[msgs.length - 1].images = images;
   return {
     model: state.settings.model,
     messages: msgs,
+    ...(tools ? { tools } : {}),
     stream,
     // All three of these have defaults that break a local 27B: reasoning
     // effort ships at xhigh, Ollama caps context at 4096 whatever the model
@@ -53,13 +69,13 @@ function requestBody(messages, { images = [], stream = true } = {}) {
   };
 }
 
-async function chat(messages, { images = [], onToken = () => {} } = {}) {
+async function chat(messages, { images = [], onToken = () => {}, tools = null } = {}) {
   let res;
   try {
     res = await fetch(state.settings.ollamaUrl + '/api/chat', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(requestBody(messages, { images })),
+      body: JSON.stringify(requestBody(messages, { images, tools })),
       signal: AbortSignal.timeout(180000)
     });
   } catch (err) {
@@ -71,6 +87,7 @@ async function chat(messages, { images = [], onToken = () => {} } = {}) {
   const decoder = new TextDecoder();
   let buffer = '';
   let answer = '';
+  const toolCalls = [];
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -83,10 +100,11 @@ async function chat(messages, { images = [], onToken = () => {} } = {}) {
         const obj = JSON.parse(line);
         const piece = obj?.message?.content ?? '';
         if (piece) { answer += piece; onToken(piece); }
+        if (obj?.message?.tool_calls?.length) toolCalls.push(...obj.message.tool_calls);
       } catch { /* partial */ }
     }
   }
-  return answer;
+  return { text: answer, toolCalls };
 }
 
 class OllamaUnreachable extends Error {
@@ -109,6 +127,15 @@ class OllamaUnreachable extends Error {
 
 async function snapshotOf(tabId) {
   const [{ result }] = await chrome.scripting.executeScript({ target: { tabId }, func: pageSnapshot });
+  if (isWatchPage(result.url)) {
+    // The transcript is never in the watch page's DOM; it is in the caption
+    // track named by ytInitialPlayerResponse.
+    const cues = await fetchTranscript(result.url).catch(() => null);
+    if (cues) {
+      result.adapter = 'youtube';
+      result.text = `Video: ${result.title}\n\n${result.text}\n\nTranscript:\n${formatTranscript(cues)}`;
+    }
+  }
   return result;
 }
 
@@ -169,8 +196,8 @@ async function ask(question) {
     { role: 'system', content: SYSTEM },
     { role: 'user', content: blocks.join('\n\n') + '\n\n' + question }
   ];
-  const answer = await chat(messages, { onToken: (t) => append(t) });
-  return { answer, flags: [...state.flags] };
+  const { text } = await chat(messages, { onToken: (t) => append(t) });
+  return { answer: text, flags: [...state.flags] };
 }
 
 // ----------------------------------------------------------------- agent ---
@@ -178,14 +205,29 @@ async function ask(question) {
 const AGENT_SYSTEM = SYSTEM + [
   '',
   '',
-  'You are running a browser task. Answer with a single JSON object and nothing',
-  'else. Use a ref from the snapshot; never coordinates.',
-  '  {"type":"click","ref":"e12"}',
-  '  {"type":"type","ref":"e3","value":"kettle"}',
-  '  {"type":"navigate","url":"https://..."}',
-  '  {"type":"screenshot"}',
-  '  {"type":"answer","text":"..."}'
+  'You are running a browser task. Call one tool per turn. Address elements by',
+  'the number shown in the observation, never by coordinates. Call finish when',
+  'you have the answer.'
 ].join('\n');
+
+/** Map a tool call back onto the stub's internal action shape. */
+function actionFromToolCall(call) {
+  const name = call?.function?.name;
+  const args = typeof call?.function?.arguments === 'string'
+    ? safeJson(call.function.arguments)
+    : (call?.function?.arguments ?? {});
+  switch (name) {
+    case 'click': return { type: 'click', ref: args.ref };
+    case 'type_text': return { type: 'type', ref: args.ref, value: args.text, submit: args.submit };
+    case 'navigate': return { type: 'navigate', url: args.url };
+    case 'take_screenshot': return { type: 'screenshot' };
+    case 'press_key': return { type: 'press_key', key: args.key };
+    case 'finish': return { type: 'answer', text: args.summary ?? '' };
+    default: return null;
+  }
+}
+
+const safeJson = (s) => { try { return JSON.parse(s); } catch { return {}; } };
 
 async function runTask(task, opts = {}) {
   const allow = (opts.allowOrigins ?? []).map((o) => new URL(o).origin);
@@ -206,10 +248,13 @@ async function runTask(task, opts = {}) {
       { role: 'system', content: AGENT_SYSTEM },
       { role: 'user', content: fence(snap) + '\n\nTask: ' + task + '\n\nJournal so far:\n' + journalText() }
     ];
-    const raw = await chat(messages, { images: pendingImage ? [pendingImage] : [] });
+    const { text: raw, toolCalls } = await chat(messages, {
+      images: pendingImage ? [pendingImage] : [],
+      tools: TOOLS
+    });
     pendingImage = null;
 
-    const action = parseAction(raw);
+    const action = toolCalls.length ? actionFromToolCall(toolCalls[0]) : parseAction(raw);
     if (!action) { answer = raw.trim(); break; }
     if (action.type === 'answer') { answer = action.text ?? ''; record(step, { action: 'answer', observation: answer }); break; }
 

@@ -29,7 +29,15 @@ function resolveExecutable() {
  */
 const OFF_LIMITS = [/evil\.example/i, /elsewhere\.example/i, /\.onion\b/i];
 
-export async function launchWithExtension({ extensionPath, headless = true, slowMo = 0 }) {
+/**
+ * Hostnames the fixtures are served under, resolved to the local fixture
+ * server. Site adapters key off the hostname — the YouTube adapter checks for
+ * youtube.com and nothing else — so a fixture served from 127.0.0.1 would be
+ * testing the generic extractor while claiming to test the adapter.
+ */
+export const FIXTURE_HOSTS = ['www.youtube.com', 'youtube.com', 'docs.google.com', 'drive.google.com'];
+
+export async function launchWithExtension({ extensionPath, headless = true, slowMo = 0, fixturePort = 8731 }) {
   if (!fs.existsSync(path.join(extensionPath, 'manifest.json'))) {
     throw new Error(`No manifest.json under ${extensionPath} — is that an unpacked extension?`);
   }
@@ -47,7 +55,8 @@ export async function launchWithExtension({ extensionPath, headless = true, slow
       `--load-extension=${extensionPath}`,
       '--no-first-run',
       '--no-default-browser-check',
-      '--disable-features=DialMediaRouteProvider'
+      '--disable-features=DialMediaRouteProvider',
+      `--host-resolver-rules=${FIXTURE_HOSTS.map((h) => `MAP ${h} 127.0.0.1:${fixturePort}`).join(', ')}`
     ],
     viewport: { width: 1280, height: 900 }
   });
@@ -80,12 +89,18 @@ export async function launchWithExtension({ extensionPath, headless = true, slow
 
   const extensionId = await resolveExtensionId(context);
 
+  // The panel's path comes from the manifest rather than being assumed: builds
+  // put it at sidepanel.html or sidepanel/index.html and both are fine.
+  const manifest = JSON.parse(fs.readFileSync(path.join(extensionPath, 'manifest.json'), 'utf8'));
+  const panelPath = manifest.side_panel?.default_path ?? manifest.action?.default_popup ?? 'sidepanel.html';
+
   return {
     context,
     extensionId,
     blockedRequests,
     navigations,
-    sidePanelUrl: `chrome-extension://${extensionId}/sidepanel.html`,
+    manifest,
+    sidePanelUrl: `chrome-extension://${extensionId}/${panelPath}`,
     close: async () => {
       await context.close().catch(() => {});
       fs.rmSync(userDataDir, { recursive: true, force: true });

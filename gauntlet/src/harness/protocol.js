@@ -1,31 +1,51 @@
-// The wire format the gauntlet assumes between the extension and the model.
+// The wire format between the extension and the model.
 //
 // This file and driver.js are the only two that know anything about the
-// extension's internals. If the real build's snapshot or action encoding turns
-// out different, change these constants and every test keeps working.
+// extension's internals. The dialect below is the one the extension actually
+// speaks, read off its own tool schema rather than imposed on it:
+//
+//   snapshot line   [12] link "Meridian desk lamp" [flags]
+//   action          a native Ollama tool call, or — for models without tool
+//                   calling — {"tool": "...", "arguments": {...}} constrained
+//                   by a JSON schema.
+//
+// The mock speaks this so that what it exercises is the extension's real
+// decoding path, not a format invented for the test.
 
-/**
- * How a ref appears in a snapshot line. The architecture note says actions
- * carry a ref into the snapshot, never coordinates, so a snapshot line looks
- * roughly like:
- *
- *   link "Meridian desk lamp" [ref=e17]
- */
-export const REF_PATTERN = /\[ref=([a-zA-Z0-9_-]+)\]/g;
+/** Snapshot ref shapes, newest first. */
+export const REF_PATTERNS = [
+  /^\s*\[(\d+)\]/,                  // [12] link "…"
+  /\[ref=([a-zA-Z0-9_-]+)\]/        // legacy: link "…" [ref=e12]
+];
 
-/** How the model is expected to answer with an action. */
-export const ACTION_ENCODING = {
-  /** Emit a bare JSON object; the extension parses it out of the content. */
-  encode(action) {
-    return JSON.stringify(action);
-  },
-  /** Read an action back out of a model message, for assertions. */
-  decode(content) {
-    const match = content.match(/\{[\s\S]*\}/);
-    if (!match) return null;
-    try { return JSON.parse(match[0]); } catch { return null; }
-  }
+/** Generic action names the gauntlet scripts, mapped onto the extension's tools. */
+export const TOOL_NAMES = {
+  click: 'click',
+  type: 'type_text',
+  navigate: 'navigate',
+  screenshot: 'take_screenshot',
+  answer: 'finish',
+  scroll: 'scroll',
+  submit: 'press_key',
+  transcript: 'get_transcript',
+  observe: 'observe'
 };
+
+/** Turn a generic action into the arguments the extension's tool expects. */
+export function toToolCall(action) {
+  const name = TOOL_NAMES[action.type] ?? action.type;
+  const ref = action.ref != null && /^\d+$/.test(String(action.ref)) ? Number(action.ref) : action.ref;
+  switch (action.type) {
+    case 'click': return { name, arguments: { ref } };
+    case 'type': return { name, arguments: { ref, text: action.value ?? '', submit: Boolean(action.submit) } };
+    case 'navigate': return { name, arguments: { url: action.url } };
+    case 'screenshot': return { name, arguments: {} };
+    case 'submit': return { name, arguments: { key: 'Enter' } };
+    case 'answer': return { name, arguments: { summary: action.text ?? '', succeeded: true } };
+    case 'scroll': return { name, arguments: { direction: action.direction ?? 'down' } };
+    default: return { name, arguments: { ...action, type: undefined } };
+  }
+}
 
 /** Everything the extension sent, flattened to one string for matching. */
 export function allText(body) {
@@ -53,20 +73,22 @@ export function lastUserText(body) {
 
 /** Every ref the snapshot offered, with the line it appeared on. */
 export function extractRefs(body) {
-  const text = allText(body);
   const out = [];
-  for (const line of text.split('\n')) {
-    for (const m of line.matchAll(REF_PATTERN)) out.push({ ref: m[1], line: line.trim() });
+  for (const line of allText(body).split('\n')) {
+    for (const pattern of REF_PATTERNS) {
+      const m = line.match(pattern);
+      if (m) { out.push({ ref: m[1], line: line.trim() }); break; }
+    }
   }
   return out;
 }
 
 /**
- * Turn a scripted intent ("click the thing labelled X") into the action text
- * the mock returns, resolving the ref against the snapshot the extension
- * actually sent. This is deliberately not a lookup table of hardcoded refs: if
- * the snapshot does not expose a findable ref for a visible, clickable thing,
- * the mock cannot act, and that is a genuine failure of the snapshot format.
+ * Turn a scripted intent ("click the thing labelled X") into the action the
+ * mock returns, resolving the ref against the snapshot the extension actually
+ * sent. This is deliberately not a lookup table of hardcoded refs: if the
+ * snapshot does not expose a findable ref for a visible, clickable thing, the
+ * mock cannot act, and that is a genuine failure of the snapshot format.
  */
 export function resolveAction(act, body) {
   const spec = { ...act };
@@ -74,24 +96,23 @@ export function resolveAction(act, body) {
   if (spec.find) {
     const refs = extractRefs(body);
     const needle = spec.find.toLowerCase();
-    // Prefer an exact quoted label, fall back to a substring match.
     const exact = refs.find((r) => r.line.toLowerCase().includes('"' + needle + '"'));
     const loose = refs.find((r) => r.line.toLowerCase().includes(needle));
     const hit = exact ?? loose;
     if (!hit) {
       return {
-        text: ACTION_ENCODING.encode({
+        unresolved: spec.find,
+        toolCall: toToolCall({
           type: 'answer',
           text: 'GAUNTLET-MOCK-UNRESOLVED: no ref in the snapshot matched ' + JSON.stringify(spec.find)
-        }),
-        unresolved: spec.find
+        })
       };
     }
     spec.ref = hit.ref;
     delete spec.find;
   }
 
-  return { text: ACTION_ENCODING.encode(spec), unresolved: false };
+  return { toolCall: toToolCall(spec), unresolved: false };
 }
 
 /**
@@ -100,11 +121,10 @@ export function resolveAction(act, body) {
  * a boundary exists and is labelled, not which syntax was picked.
  */
 export const FENCE_MARKERS = [
-  /<untrusted[_-]?(page[_-]?)?(content|data)>/i,
+  /<untrusted[_-]?[a-z]*[_-]?(content|data|page)?[^>]*>/i,
   /```untrusted/i,
-  /BEGIN UNTRUSTED PAGE CONTENT/i,
-  /\[untrusted page content\]/i,
-  /<page_content[^>]*untrusted/i
+  /BEGIN UNTRUSTED/i,
+  /\[untrusted[^\]]*\]/i
 ];
 
 export function looksFenced(text, injectedSnippet) {

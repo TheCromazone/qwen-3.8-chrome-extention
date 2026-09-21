@@ -65,8 +65,19 @@ export async function startOllamaServer({
       // actually sent, the way a model would. If the ref for the thing it was
       // told to click is not findable in the snapshot, the mock says so — and
       // that is a real finding about the snapshot format, not a mock bug.
-      const resolved = resolveAction(step.act, body);
-      return { content: resolved.text, unresolved: resolved.unresolved };
+      const { toolCall, unresolved } = resolveAction(step.act, body);
+
+      // Answer in whichever dialect this request asked for: a native tool call
+      // when the extension offered tools, the constrained JSON object when it
+      // sent a schema instead. Anything else and the mock would be testing a
+      // decoding path the extension does not use.
+      if (Array.isArray(body.tools) && body.tools.length) {
+        return { content: '', toolCalls: [{ function: toolCall }], unresolved };
+      }
+      return {
+        content: JSON.stringify({ tool: toolCall.name, arguments: toolCall.arguments }),
+        unresolved
+      };
     }
     return { content: '' };
   }
@@ -146,23 +157,40 @@ export async function startOllamaServer({
       if (mode === 'proxy') return void proxyThrough(req, res, url, upstream, requests, raw, record);
 
       const step = nextScripted(body);
-      const { content, unresolved, unscripted } = renderScripted(step, body);
+      const { content, toolCalls, unresolved, unscripted } = renderScripted(step, body);
       record.mockStep = step ?? null;
       record.mockUnresolved = unresolved ?? false;
       record.mockUnscripted = unscripted ?? false;
+      record.mockToolCalls = toolCalls ?? null;
 
+      const now = () => new Date().toISOString();
       const stream = body.stream !== false;
-      const msg = { role: 'assistant', content };
+
       if (!stream) {
         res.writeHead(200, { ...CORS, 'content-type': 'application/json' });
-        res.end(JSON.stringify({ model: body.model ?? model, created_at: new Date().toISOString(), message: msg, done: true, done_reason: 'stop' }));
+        res.end(JSON.stringify({
+          model: body.model ?? model,
+          created_at: now(),
+          message: { role: 'assistant', content, ...(toolCalls ? { tool_calls: toolCalls } : {}) },
+          done: true,
+          done_reason: 'stop'
+        }));
         return;
       }
+
       // Stream it in pieces so the extension's streaming path is exercised.
+      // A tool call arrives whole on the final chunk, the way Ollama sends it.
       const pieces = chunk(content, 24);
       ndjson(res, [
-        ...pieces.map((p) => ({ model: body.model ?? model, created_at: new Date().toISOString(), message: { role: 'assistant', content: p }, done: false })),
-        { model: body.model ?? model, created_at: new Date().toISOString(), message: { role: 'assistant', content: '' }, done: true, done_reason: 'stop', eval_count: pieces.length }
+        ...pieces.map((p) => ({ model: body.model ?? model, created_at: now(), message: { role: 'assistant', content: p }, done: false })),
+        {
+          model: body.model ?? model,
+          created_at: now(),
+          message: { role: 'assistant', content: '', ...(toolCalls ? { tool_calls: toolCalls } : {}) },
+          done: true,
+          done_reason: toolCalls ? 'stop' : 'stop',
+          eval_count: pieces.length
+        }
       ]);
       return;
     }

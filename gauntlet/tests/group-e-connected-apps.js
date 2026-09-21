@@ -13,7 +13,7 @@ export default [
       if (mode === 'mock') {
         ollama.setScript([], { content: 'Phase one covers 14 regional sites.' });
       }
-      await open('/drive/doc.html');
+      await open('/document/d/rollout/edit', { host: 'docs.google.com' });
       await driver.openPanel();
 
       const { answer } = await driver.ask('How many sites does phase one cover?');
