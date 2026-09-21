@@ -168,3 +168,21 @@ export function looksFenced(prompt, injectedSnippet, { systemText = '' } = {}) {
 
   return { fenced: true, via: selfLabelled ? 'self-labelled delimiter' : 'standing rule in the system prompt' };
 }
+
+/** The system messages of one recorded request, joined. */
+export function systemTextOf(record) {
+  return (record?.body?.messages ?? [])
+    .filter((m) => m.role === 'system')
+    .map((m) => (typeof m.content === 'string' ? m.content : ''))
+    .join('\n');
+}
+
+/**
+ * Whether a system prompt states, on its own, that page content is data.
+ * Separated from `looksFenced` because the property has to be checked where
+ * there is no injection to fence: a rule that only appears once a detector has
+ * fired is not a standing rule.
+ */
+export function statesPageIsData(systemText) {
+  return STANDING_RULE.some((m) => m.test(systemText));
+}

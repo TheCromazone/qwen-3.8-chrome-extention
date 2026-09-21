@@ -1,6 +1,6 @@
 # The gauntlet
 
-A QA harness that runs the extension through twenty-three real browser tasks
+A QA harness that runs the extension through twenty-four real browser tasks
 drawn from what Ask Gemini in Chrome actually does, and reports a scoreboard.
 
 `GAUNTLET.md` is the task list and what each one has to do to pass.
@@ -25,7 +25,7 @@ node scripts/run.js --mode=mock --extension=/path/to/dist
 ```
 
 There is no silent fallback. A run that quietly tested the reference stub and
-reported 21 of 21 would look exactly like an answer while being none, so if
+reported 22 of 22 would look exactly like an answer while being none, so if
 there is no extension to test the run stops and says so.
 
 Mock mode needs no GPU and no model. It points the extension at a scripted
@@ -99,7 +99,7 @@ node scripts/loop.js --branch=feat/qwen-browser-agent   # re-run on every push
 
 ## What "passing" means
 
-Twenty-one of the twenty-three tasks run in mock mode; twenty-one run in real
+Twenty-two of the twenty-four tasks run in mock mode; twenty-two run in real
 mode. Mock results are honest about plumbing and say nothing about whether the
 model is any good. Real results are the ones that answer Matthew's question,
 and they can only be produced on his machine — no cloud session can reach his
