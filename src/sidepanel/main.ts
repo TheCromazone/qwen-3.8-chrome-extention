@@ -170,24 +170,39 @@ function finishJournal(answer: string): void {
   void persistRun();
 }
 
-/** Session storage outlives the panel document but not the browser; that is the right lifetime. */
+/** Observations can be long; the stored copy keeps enough of each to read the run back. */
+const STORED_STEP_CHARS = 6000;
+const STORED_STEPS_MAX = 400;
+
+/**
+ * The journal lives in extension storage, which outlives the panel document
+ * and the browser session both: a long task is exactly when someone closes
+ * the panel, and the record has to be there when they come back.
+ */
 async function persistRun(): Promise<void> {
+  if (!currentRun) return;
+  const steps = currentRun.steps.slice(-STORED_STEPS_MAX).map((step) =>
+    step.text.length > STORED_STEP_CHARS ? { ...step, text: `${step.text.slice(0, STORED_STEP_CHARS)}…` } : step,
+  );
   try {
-    await chrome.storage.session.set({ lastRun: currentRun });
+    await chrome.storage.local.set({ lastRun: { ...currentRun, steps } });
   } catch {
-    /* storage unavailable; the run still shows while the panel is open */
+    /* storage unavailable or full; the run still shows while the panel is open */
   }
 }
 
 async function restoreLastRun(): Promise<void> {
   let stored: StoredRun | undefined;
   try {
-    stored = ((await chrome.storage.session.get('lastRun')) as { lastRun?: StoredRun }).lastRun;
+    stored = ((await chrome.storage.local.get('lastRun')) as { lastRun?: StoredRun }).lastRun;
   } catch {
     return;
   }
-  if (!stored?.task) return;
+  if (!stored?.task || !Array.isArray(stored.steps)) return;
 
+  // The restored run is the current one until a new task starts, so the
+  // journal reads back the same after a reopen as it did before.
+  currentRun = stored;
   addDivider(`Earlier ${stored.mode === 'ask' ? 'question' : 'task'} · ${new Date(stored.at).toLocaleTimeString()}`);
   addMessage('user', stored.task);
   for (const step of stored.steps) renderStep(step);
@@ -416,7 +431,7 @@ void installTestBridge({
     ui.transcript.replaceChildren();
     hideError();
     ui.contextNote.textContent = '';
-    void chrome.storage.session.remove('lastRun').catch(() => undefined);
+    void chrome.storage.local.remove('lastRun').catch(() => undefined);
   },
 });
 

@@ -153,10 +153,11 @@ you — with silence counting as no after a minute.
 
 Those checks live in the extension, not in the prompt. A local Qwen has none of
 the prompt-injection training the hosted assistants have, and every page it reads
-is content someone else wrote — so page text and transcripts are wrapped and
-labelled as untrusted data, text that reads like instructions aimed at an AI
-agent is flagged inline, and the gates are enforced in code where the model
-cannot talk its way past them. Password field contents are never put in the
+is content someone else wrote — so page text and transcripts are wrapped in
+tags, both system prompts say unconditionally that whatever is inside those tags
+is data and never an instruction, text that reads like instructions aimed at an
+AI agent is additionally flagged inline, and the gates are enforced in code where
+the model cannot talk its way past them. Password field contents are never put in the
 model's context.
 
 This reduces the risk; it does not eliminate it. Don't turn the confirmations off
@@ -164,10 +165,12 @@ on a site where a mistake costs money.
 
 ## What the panel remembers
 
-Each run's steps are written to the extension's session storage as they happen,
-so closing and reopening the side panel shows the last run rather than a blank
-pane. A task only keeps *running* while the panel is open, though; if you close
-it mid-task, you will see how far it got and can start again.
+Each run's steps are written to the extension's local storage as they happen,
+so closing and reopening the side panel — or Chrome itself — shows the last run
+rather than a blank pane. A task only keeps *running* while the panel is open,
+though; if you close it mid-task, you will see how far it got and can start
+again. The stored copy keeps the first 6,000 characters of each step and the
+last 400 steps; it never leaves the machine.
 
 ## Development
 
