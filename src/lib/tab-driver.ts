@@ -3,7 +3,7 @@
  * the service worker: an MV3 worker is torn down after ~30s idle, which would
  * kill a long agent run mid-step.
  */
-import type { ContentCommand, PageAction } from '../content/page-agent.ts';
+import type { ContentCommand, PageAction, SettleResult } from '../content/page-agent.ts';
 import type { ActionResult } from '../content/actions.ts';
 import type { Observation, PageContext, TranscriptCue } from './types.ts';
 import { isBlockedUrl } from './safety.ts';
@@ -60,6 +60,12 @@ export async function readPage(tabId: number, charBudget: number, includeTranscr
 export async function observePage(tabId: number, textBudget = 3000): Promise<Observation> {
   await ensureContentScript(tabId);
   return send<Observation>(tabId, { command: 'observe', textBudget });
+}
+
+/** Waits for the page's DOM to stop changing before it is observed. */
+export async function settlePage(tabId: number, maxMs = 5000): Promise<SettleResult> {
+  await ensureContentScript(tabId);
+  return send<SettleResult>(tabId, { command: 'settle', maxMs });
 }
 
 export async function performAction(tabId: number, action: PageAction): Promise<ActionResult> {

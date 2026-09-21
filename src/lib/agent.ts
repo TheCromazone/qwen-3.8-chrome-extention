@@ -275,7 +275,7 @@ async function execute(name: string, args: Record<string, unknown>, ctx: Execute
       const blocked = await gate(assessNavigation(url, current?.url ?? ''));
       if (blocked) return { text: blocked };
       await tabs.navigateTab(tabId, url);
-      return withObservation(ctx, `Navigated to ${url}.`);
+      return withObservation(ctx, `Navigated to ${url}.`, { settle: true });
     }
 
     case 'open_tab': {
@@ -286,7 +286,7 @@ async function execute(name: string, args: Record<string, unknown>, ctx: Execute
       if (blocked) return { text: blocked };
       const tab = await tabs.openTab(url);
       if (!tab.id) return { text: 'Error: the new tab could not be opened.' };
-      return withObservation({ ...ctx, tabId: tab.id }, `Opened ${url} in a new tab.`, { newTabId: tab.id });
+      return withObservation({ ...ctx, tabId: tab.id }, `Opened ${url} in a new tab.`, { newTabId: tab.id, settle: true });
     }
 
     case 'list_tabs': {
@@ -322,7 +322,7 @@ async function execute(name: string, args: Record<string, unknown>, ctx: Execute
     case 'wait': {
       const ms = Math.min(10000, Math.max(0, argInt(args, 'ms') ?? 1000));
       await tabs.performAction(tabId, { kind: 'wait', ms });
-      return withObservation(ctx, `Waited ${ms}ms.`);
+      return withObservation(ctx, `Waited ${ms}ms.`, { settle: true });
     }
 
     case 'take_screenshot': {
@@ -352,16 +352,23 @@ async function withObservation(
 ): Promise<ExecuteOutcome> {
   const tabId = opts.newTabId ?? ctx.tabId;
 
+  let notice = '';
   if (opts.settle) {
     // A click or a submit may start a navigation; give it a chance to commit
     // before we describe the page, or we describe the page being left behind.
     await tabs.waitForLoad(tabId, 8000);
+    // Then wait for the DOM itself to stop changing. `load` fires long before
+    // a client-rendered page has finished drawing what the user will see.
+    const settled = await tabs.settlePage(tabId).catch(() => null);
+    if (settled && !settled.settled) {
+      notice = '\n\n[notice] The page was still changing when it was read; if an element you expect is missing, call observe again.';
+    }
   }
 
   try {
     const observation = await tabs.observePage(tabId);
     return {
-      text: `${detail}\n\n${renderObservation(observation)}`,
+      text: `${detail}${notice}\n\n${renderObservation(observation)}`,
       tabId,
       elements: observation.elements,
     };

@@ -38,6 +38,12 @@ immediately.
 ollama pull qwen3.8:27b
 ```
 
+On an NVIDIA card, `qwen3.8:27b-mtp-q4_K_M` is the same 18 GB and noticeably
+faster (multi-token prediction, i.e. speculative decoding); the trade-off is that
+its output is no longer bit-for-bit reproducible, which is why the default stays
+on the plain tag. The full list of builds is on the
+[tags page](https://ollama.com/library/qwen3.8/tags).
+
 Any Ollama model works — set the tag in the extension's settings. The extension
 asks Ollama what the model can do (`/api/show`) and adapts: screenshots are only
 offered to models that report image support, and models without native tool
@@ -180,6 +186,13 @@ the new page's element list, so the model is never working from a stale picture
 after a navigation — the numbers are regenerated each time and the newest list is
 always the one in front of it. This is what keeps it oriented when a click lands
 somewhere unexpected.
+
+**It waits for the page to stop changing before reading it.** `load` fires long
+before a client-rendered page has finished drawing, so after anything that can
+change the page the extension waits until two structural snapshots taken 300 ms
+apart match (capped at 5 s) before it looks. Without this the model perceives a
+half-rendered page and picks an element that is about to move, and the failure
+looks like model flakiness rather than the timing bug it is.
 
 **A model without tool calling gets a grammar, not just instructions.** Where
 Ollama reports native tool support, that is used. Where it does not, the request
