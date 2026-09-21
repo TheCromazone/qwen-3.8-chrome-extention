@@ -1,1 +1,6 @@
 node_modules/
+
+# Scoreboards are generated on every run. CI publishes them as annotations, a
+# job summary and an artifact; committing them would mean a dirty tree after
+# every local run and a diff on every push that says nothing about the code.
+results/

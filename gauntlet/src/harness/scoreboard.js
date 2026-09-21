@@ -42,7 +42,10 @@ export function renderMarkdown(run, previous = null) {
   const lines = [];
   lines.push(`# Gauntlet scoreboard — ${run.mode} mode`);
   lines.push('');
-  lines.push(`Run at ${new Date(run.startedAt).toISOString()}, took ${Math.round((run.finishedAt - run.startedAt) / 1000)}s.`);
+  lines.push(
+    `Run at ${new Date(run.startedAt).toISOString()} against \`${run.extension ?? 'unknown'}\`, ` +
+      `took ${Math.round((run.finishedAt - run.startedAt) / 1000)}s.`
+  );
   lines.push('');
   const env = run.environment ?? environment();
   lines.push(
@@ -56,7 +59,7 @@ export function renderMarkdown(run, previous = null) {
 
   const diff = previous ? diffRuns(previous, run) : null;
   if (diff && (diff.fixed.length || diff.broken.length)) {
-    lines.push('## Since the last run');
+    lines.push(`## Since the last run against \`${run.extension ?? 'this extension'}\``);
     lines.push('');
     for (const id of diff.fixed) lines.push(`- fixed: \`${id}\``);
     for (const id of diff.broken) lines.push(`- broke: \`${id}\``);
@@ -110,12 +113,31 @@ export function diffRuns(before, after) {
   return { fixed, broken };
 }
 
+/** A filename-safe name for the thing under test, so runs diff like with like. */
+export function slugFor(extensionPath) {
+  const parts = extensionPath.split(path.sep).filter(Boolean);
+  const name = parts.at(-1) === 'dist' ? (parts.at(-2) ?? 'dist') : (parts.at(-1) ?? 'extension');
+  return name.replace(/^\.+/, '').replace(/[^a-zA-Z0-9._-]/g, '-').slice(0, 40) || 'extension';
+}
+
 export function writeScoreboard(run, dir) {
   fs.mkdirSync(dir, { recursive: true });
-  const jsonPath = path.join(dir, `scoreboard.${run.mode}.json`);
-  const previous = fs.existsSync(jsonPath) ? JSON.parse(fs.readFileSync(jsonPath, 'utf8')) : null;
-  fs.writeFileSync(jsonPath, JSON.stringify(run, null, 2));
+  const slug = run.extension ?? 'extension';
+
+  // History is kept per extension. Diffing the build branch against the last
+  // stub run would report every difference between two different programs as a
+  // regression, which is worse than no diff at all.
+  const historyPath = path.join(dir, `scoreboard.${run.mode}.${slug}.json`);
+  const previous = fs.existsSync(historyPath) ? JSON.parse(fs.readFileSync(historyPath, 'utf8')) : null;
+  fs.writeFileSync(historyPath, JSON.stringify(run, null, 2));
+
   const md = renderMarkdown(run, previous);
+  fs.writeFileSync(path.join(dir, `scoreboard.${run.mode}.${slug}.md`), md);
+
+  // The unsuffixed pair is always the most recent run, whatever it was against;
+  // CI publishes these.
+  fs.writeFileSync(path.join(dir, `scoreboard.${run.mode}.json`), JSON.stringify(run, null, 2));
   fs.writeFileSync(path.join(dir, `scoreboard.${run.mode}.md`), md);
-  return { previous, markdown: md, jsonPath };
+
+  return { previous, markdown: md, jsonPath: historyPath };
 }

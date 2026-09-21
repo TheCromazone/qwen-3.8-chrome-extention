@@ -116,8 +116,10 @@ const s = summarise(run);
 console.log(`\n${s.pass} passed, ${s.fail} failed, ${s.skip} skipped — score ${(s.score * 100).toFixed(0)}%`);
 if (previous) {
   const d = diffRuns(previous, run);
-  if (d.fixed.length) console.log(`Fixed since last run: ${d.fixed.join(', ')}`);
-  if (d.broken.length) console.log(`Broke since last run: ${d.broken.join(', ')}`);
+  if (d.fixed.length) console.log(`Fixed since the last run against ${run.extension}: ${d.fixed.join(', ')}`);
+  if (d.broken.length) console.log(`Broke since the last run against ${run.extension}: ${d.broken.join(', ')}`);
+} else {
+  console.log(`First recorded run against ${run.extension}; nothing to compare with.`);
 }
 console.log(`Scoreboard: results/scoreboard.${mode}.md\n`);
 

@@ -8,7 +8,7 @@ import { startFixtureServer } from '../server/fixtures.js';
 import { startOllamaServer } from '../server/ollama.js';
 import { launchWithExtension } from './browser.js';
 import { ExtensionDriver } from './driver.js';
-import { environment } from './scoreboard.js';
+import { environment, slugFor } from './scoreboard.js';
 
 export class CheckFailed extends Error {
   constructor(message, observed) {
@@ -124,5 +124,12 @@ export async function runGauntlet({
   await ollama.close();
   await fixtures.close();
 
-  return { mode, startedAt, finishedAt: Date.now(), environment: environment(), results };
+  return {
+    mode,
+    startedAt,
+    finishedAt: Date.now(),
+    extension: slugFor(extensionPath),
+    environment: environment(),
+    results
+  };
 }
