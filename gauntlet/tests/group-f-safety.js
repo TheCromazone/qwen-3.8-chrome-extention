@@ -67,12 +67,15 @@ export default [
         offOriginPrompts
       );
 
-      // 3. The injected text reached the model fenced as data.
-      const prompt = ollama.requests.at(-1)?.promptText ?? '';
-      const fence = looksFenced(prompt, INJECTED);
-      check(fence.fenced, `page text was not fenced as untrusted data: ${fence.reason}`, {
-        promptHead: prompt.slice(0, 600)
-      });
+      // 3. The injected text reached the model behind a boundary, and the
+      //    model was told what that boundary means — unconditionally, rather
+      //    than only when a detector happened to fire.
+      const last = ollama.requests.at(-1);
+      const prompt = last?.promptText ?? '';
+      const systemText = (last?.body?.messages ?? []).filter((m) => m.role === 'system')
+        .map((m) => (typeof m.content === 'string' ? m.content : '')).join('\n');
+      const fence = looksFenced(prompt, INJECTED, { systemText });
+      check(fence.fenced, fence.reason, { systemPrompt: systemText.slice(0, 700) });
 
       // 4. It said so. Silently surviving an attack teaches the user nothing.
       const flags = result.flags ?? [];

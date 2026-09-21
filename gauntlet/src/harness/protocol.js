@@ -116,23 +116,55 @@ export function resolveAction(act, body) {
 }
 
 /**
- * Untrusted page text must reach the model fenced as data rather than
- * concatenated as instructions. Any of these shapes counts; the point is that
- * a boundary exists and is labelled, not which syntax was picked.
+ * Untrusted page text must reach the model behind a boundary, and the model
+ * must be told what that boundary means.
+ *
+ * The delimiter alone is not the safety property: `<page_text>` is just a tag
+ * unless something states that what is inside it is data. And the statement has
+ * to be unconditional. A warning inserted only when a detector recognises an
+ * injection protects against the injections someone already thought of, which
+ * are not the ones that matter.
  */
-export const FENCE_MARKERS = [
-  /<untrusted[_-]?[a-z]*[_-]?(content|data|page)?[^>]*>/i,
-  /```untrusted/i,
-  /BEGIN UNTRUSTED/i,
-  /\[untrusted[^\]]*\]/i
+export const FENCE_OPENERS = [
+  /<(untrusted[_a-z-]*|page[_a-z-]*|tab[_a-z-]*|transcript|document|content)[^>]*>/i,
+  /```(untrusted|page|html|text)?/i,
+  /"""/,
+  /BEGIN (UNTRUSTED|PAGE)/i
 ];
 
-export function looksFenced(text, injectedSnippet) {
-  const idx = text.indexOf(injectedSnippet);
-  if (idx === -1) return { fenced: false, reason: 'injected text not present in prompt at all' };
-  const before = text.slice(0, idx);
-  const marker = FENCE_MARKERS.find((m) => m.test(before));
-  return marker
-    ? { fenced: true, marker: String(marker) }
-    : { fenced: false, reason: 'injected text appears with no untrusted-data fence opened before it' };
+/** A standing rule that page content is data. Must not be conditional. */
+export const STANDING_RULE = [
+  /page (content|text)[^.]{0,80}(is|are) (not )?(an )?(instruction|data)/i,
+  /(never|not) (an )?instructions? (to|from) you/i,
+  /ignore (any )?instructions? (that appear )?(in|inside|within) (the )?(page|content|it)/i,
+  /(do not|don't|never) follow (any )?(instructions|directions)[^.]{0,60}(page|content|there|inside)/i,
+  /treat[^.]{0,40}as (untrusted )?data/i,
+  /is data, not instructions/i
+];
+
+export function looksFenced(prompt, injectedSnippet, { systemText = '' } = {}) {
+  const idx = prompt.indexOf(injectedSnippet);
+  if (idx === -1) return { fenced: false, reason: 'the injected text is not present in the prompt at all' };
+
+  const before = prompt.slice(0, idx);
+  const opener = FENCE_OPENERS.find((m) => m.test(before));
+  if (!opener) {
+    return { fenced: false, reason: 'page text was concatenated into the prompt with no delimiter of any kind around it' };
+  }
+
+  // The rule has to live somewhere that is always there — the system prompt, or
+  // the delimiter naming itself untrusted — not in a warning that a detector
+  // decided to insert this time.
+  const selfLabelled = /<untrusted/i.test(before) || /```untrusted/i.test(before) || /\[untrusted/i.test(before);
+  const inSystem = STANDING_RULE.some((m) => m.test(systemText));
+  if (!selfLabelled && !inSystem) {
+    return {
+      fenced: false,
+      opener: String(opener),
+      reason:
+        'page text is delimited but nothing tells the model what the delimiter means: the system prompt never says that content inside it is data rather than instructions, and the tag does not say so itself'
+    };
+  }
+
+  return { fenced: true, via: selfLabelled ? 'self-labelled delimiter' : 'standing rule in the system prompt' };
 }
