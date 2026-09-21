@@ -31,6 +31,7 @@ if (!process.env.DISPLAY && !process.env.GAUNTLET_NO_XVFB) {
   );
 }
 import { TASKS } from '../tests/index.js';
+import { prepareExtension } from './prepare-extension.js';
 import { runGauntlet } from '../src/harness/runner.js';
 import { writeScoreboard, summarise, diffRuns } from '../src/harness/scoreboard.js';
 
@@ -45,32 +46,46 @@ function arg(name, fallback = null) {
 const flag = (name) => process.argv.includes(`--${name}`);
 
 /**
- * Where the extension is. Default: wherever the real build put its manifest,
- * searched shallowly so this keeps working whether it lands at the repo root,
- * under extension/, or under dist/ after a build step.
+ * Where the extension is.
+ *
+ * The gauntlet lives on its own branch, so a checkout of it does not contain
+ * the extension. --branch fetches and builds one. Falling back to the reference
+ * stub is never silent and never implicit: a run that quietly tests the stub
+ * and reports 21 of 21 is worse than no run, because it looks like an answer.
  */
-function findExtension(explicit) {
+function findExtension({ explicit, branch, mode }) {
   if (explicit) {
     const p = path.resolve(GAUNTLET_DIR, explicit);
     if (fs.existsSync(path.join(p, 'manifest.json'))) return p;
     throw new Error(`No manifest.json under ${p}`);
   }
-  const candidates = ['dist', 'extension', 'src', '.', 'build'].map((c) => path.resolve(REPO_DIR, c));
-  for (const c of candidates) {
+
+  if (branch) {
+    const built = prepareExtension(branch);
+    console.log(`  Built ${built.branch} at ${built.head.slice(0, 8)}\n`);
+    return built.path;
+  }
+
+  for (const c of ['dist', 'extension', 'src', '.', 'build'].map((d) => path.resolve(REPO_DIR, d))) {
     if (fs.existsSync(path.join(c, 'manifest.json'))) return c;
   }
-  const stub = path.resolve(GAUNTLET_DIR, 'stub-extension');
+
   console.error(
-    '\n  No built extension found in this repo (looked for manifest.json in dist/, extension/, src/, build/ and the repo root).\n' +
-    '  Running against the reference stub instead, which proves the harness but tells you nothing about the real build.\n' +
-    '  Point at the real one with --extension=PATH once it exists.\n'
+    `\n  No extension to test.\n\n` +
+    `  There is no manifest.json in dist/, extension/, src/, build/ or the repo root,\n` +
+    `  which is normal on the gauntlet's own branch — the extension lives on another one.\n\n` +
+    `  Build and test a branch:   npm run gauntlet${mode === 'real' ? ':real' : ''} -- --branch=feat/qwen-browser-agent\n` +
+    `  Or point at a build:       node scripts/run.js --mode=${mode} --extension=/path/to/dist\n` +
+    `  Or check the harness:      node scripts/run.js --mode=${mode} --extension=stub-extension\n\n` +
+    `  The last one runs the reference stub. It proves the harness works and says\n` +
+    `  nothing at all about the extension, so it is never chosen for you.\n`
   );
-  return stub;
+  process.exit(2);
 }
 
 const mode = arg('mode', 'mock');
 const only = arg('only') ? arg('only').split(',').map((s) => s.trim().toUpperCase()) : null;
-const extensionPath = findExtension(arg('extension'));
+const extensionPath = findExtension({ explicit: arg('extension'), branch: arg('branch'), mode });
 const upstream = arg('upstream', process.env.OLLAMA_URL ?? 'http://127.0.0.1:11434');
 
 if (mode === 'real') {

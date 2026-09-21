@@ -8,11 +8,25 @@ drawn from what Ask Gemini in Chrome actually does, and reports a scoreboard.
 
 ## Running it
 
+The gauntlet and the extension are on different branches, so a checkout of the
+gauntlet does not contain the thing it tests. Name the branch and it will be
+fetched and built for you:
+
 ```bash
 cd gauntlet
 npm install
-npm run gauntlet          # mock mode, against the extension in this repo
+npm run gauntlet -- --branch=feat/qwen-browser-agent
 ```
+
+Or point at a build you already have:
+
+```bash
+node scripts/run.js --mode=mock --extension=/path/to/dist
+```
+
+There is no silent fallback. A run that quietly tested the reference stub and
+reported 21 of 21 would look exactly like an answer while being none, so if
+there is no extension to test the run stops and says so.
 
 Mock mode needs no GPU and no model. It points the extension at a scripted
 Ollama and measures the harness: page extraction, the element index, whether an
@@ -27,7 +41,7 @@ On the machine with the GPU:
 ollama serve                       # if it is not already running
 ollama pull qwen3.8:27b
 cd gauntlet && npm install
-npm run gauntlet:real
+npm run gauntlet:real -- --branch=feat/qwen-browser-agent
 ```
 
 Real mode puts the actual model in the loop and measures answer quality and
@@ -77,7 +91,9 @@ tasks assert it.
 ```bash
 node scripts/run.js --mode=mock --only=G17,G18     # just these tasks
 node scripts/run.js --mode=mock --headed           # watch it (needs a display)
+node scripts/run.js --branch=BRANCH                # fetch and build that branch
 node scripts/run.js --extension=../dist            # point at a specific build
+node scripts/run.js --extension=stub-extension     # check the harness itself
 node scripts/loop.js --branch=feat/qwen-browser-agent   # re-run on every push
 ```
 
