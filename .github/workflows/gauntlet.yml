@@ -1,0 +1,56 @@
+name: gauntlet
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  mock:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install
+        working-directory: gauntlet
+        run: npm install
+
+      - name: Install Chromium
+        working-directory: gauntlet
+        run: npx playwright install --with-deps chromium
+
+      # Extensions do not load in headless Chrome, so the run needs a display.
+      - name: Install Xvfb
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+
+      # The stub implements gauntlet/CONTRACT.md and nothing else. If this goes
+      # red, the harness is broken — not whatever extension is being tested.
+      - name: Harness baseline (reference stub)
+        working-directory: gauntlet
+        run: node scripts/run.js --mode=mock --extension=stub-extension
+
+      - name: Build the extension
+        id: build
+        run: |
+          if [ -f package.json ] && grep -q '"build"' package.json; then
+            npm install && npm run build
+            echo "built=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No extension build in this branch yet; skipping." >&2
+            echo "built=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Gauntlet against the extension
+        if: steps.build.outputs.built == 'true'
+        working-directory: gauntlet
+        run: node scripts/run.js --mode=mock --extension=../dist
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scoreboard
+          path: gauntlet/results/
