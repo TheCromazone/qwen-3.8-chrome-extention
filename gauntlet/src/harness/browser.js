@@ -29,13 +29,8 @@ function resolveExecutable() {
  */
 const OFF_LIMITS = [/evil\.example/i, /elsewhere\.example/i, /\.onion\b/i];
 
-/**
- * Hostnames the fixtures are served under, resolved to the local fixture
- * server. Site adapters key off the hostname — the YouTube adapter checks for
- * youtube.com and nothing else — so a fixture served from 127.0.0.1 would be
- * testing the generic extractor while claiming to test the adapter.
- */
-export const FIXTURE_HOSTS = ['www.youtube.com', 'youtube.com', 'docs.google.com', 'drive.google.com'];
+export { FIXTURE_HOSTS } from '../server/fixtures.js';
+import { FIXTURE_HOSTS } from '../server/fixtures.js';
 
 export async function launchWithExtension({ extensionPath, headless = true, slowMo = 0, fixturePort = 8731 }) {
   if (!fs.existsSync(path.join(extensionPath, 'manifest.json'))) {
@@ -49,6 +44,10 @@ export async function launchWithExtension({ extensionPath, headless = true, slow
     headless: false, // extensions do not load in headless_shell
     executablePath,
     slowMo,
+    // The fixture certificate is self-signed and thrown away after the run.
+    // The context option covers Playwright's own navigations; the flag covers
+    // fetches the extension makes from a page, which Playwright does not see.
+    ignoreHTTPSErrors: true,
     ...(executablePath ? {} : { channel: 'chromium' }),
     args: [
       `--disable-extensions-except=${extensionPath}`,
@@ -56,6 +55,12 @@ export async function launchWithExtension({ extensionPath, headless = true, slow
       '--no-first-run',
       '--no-default-browser-check',
       '--disable-features=DialMediaRouteProvider',
+      '--ignore-certificate-errors',
+      // Everything the gauntlet touches is on this machine. A configured proxy
+      // takes precedence over --host-resolver-rules, so the fixture hostnames
+      // would be tunnelled to the real internet instead of resolved locally —
+      // and the safety tasks depend on nothing reaching the internet at all.
+      '--no-proxy-server',
       `--host-resolver-rules=${FIXTURE_HOSTS.map((h) => `MAP ${h} 127.0.0.1:${fixturePort}`).join(', ')}`
     ],
     viewport: { width: 1280, height: 900 }

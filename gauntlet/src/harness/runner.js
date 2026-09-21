@@ -94,7 +94,7 @@ export async function runGauntlet({
         context: browser.context,
         open: async (p, { host } = {}) => {
           const page = await browser.context.newPage();
-          const url = host ? `http://${host}${p.startsWith('/') ? p : '/' + p}` : fixtures.url(p);
+          const url = host ? `https://${host}${p.startsWith('/') ? p : '/' + p}` : fixtures.url(p);
           await page.goto(url, { waitUntil: 'domcontentloaded' });
           return page;
         }

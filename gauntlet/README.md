@@ -59,6 +59,19 @@ setx OLLAMA_ORIGINS "chrome-extension://*"
 G21 exists to make sure the extension tells you this itself rather than showing
 a bare "Failed to fetch".
 
+## Fixtures are served over TLS
+
+Not for realism. `youtube.com` and `google.com` are in Chrome's HSTS preload
+list, so a fixture served as plain http under those names is upgraded to https
+by the browser and never connects. The server makes a throwaway self-signed
+certificate at startup (it needs `openssl` on PATH) and the browser is launched
+with `--ignore-certificate-errors` and `--no-proxy-server`, because a configured
+proxy takes precedence over `--host-resolver-rules` and would tunnel the fixture
+hostnames to the real internet.
+
+Nothing the gauntlet runs reaches the network. That is load-bearing: the safety
+tasks assert it.
+
 ## Useful flags
 
 ```bash
