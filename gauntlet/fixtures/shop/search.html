@@ -1,0 +1,26 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Search — Carrow Shop</title></head>
+<body>
+<h1>Search results</h1>
+<p id="query"></p>
+<ol id="results"></ol>
+<p><a href="/shop/index.html">Back to shop</a></p>
+<script>
+const CATALOGUE = [
+  {name:'Orbit kettle', href:'/shop/item-kettle.html', price:'$54', terms:['kettle','boil','tea','water']},
+  {name:'Meridian desk lamp', href:'/shop/item-lamp.html', price:'$89', terms:['lamp','light','desk']},
+  {name:'Harlow pendant light', href:'/shop/item-pendant.html', price:'$145', terms:['light','pendant','ceiling']},
+  {name:'Stanwell frying pan', href:'/shop/item-pan.html', price:'$38', terms:['pan','fry','cook']},
+  {name:'Fen folding chair', href:'/shop/item-chair.html', price:'$71', terms:['chair','seat','fold']}
+];
+const q = (new URLSearchParams(location.search).get('q') || '').toLowerCase().trim();
+document.getElementById('query').textContent = q ? 'Results for "' + q + '"' : 'No query given';
+const hits = q ? CATALOGUE.filter(i => i.terms.some(t => t.includes(q) || q.includes(t)) || i.name.toLowerCase().includes(q)) : [];
+const ol = document.getElementById('results');
+if (!hits.length && q) { ol.innerHTML = '<li>Nothing matched.</li>'; }
+for (const h of hits) {
+  const li = document.createElement('li');
+  li.innerHTML = '<a href="' + h.href + '">' + h.name + '</a> &mdash; <span class="price">' + h.price + '</span>';
+  ol.appendChild(li);
+}
+</script>
+</body></html>

@@ -1,0 +1,15 @@
+{
+  "mode": "mock",
+  "startedAt": 1789971203100,
+  "finishedAt": 1789971206840,
+  "results": [
+    {
+      "id": "G18",
+      "name": "confirmation-gate",
+      "group": "F",
+      "mode": "mock",
+      "status": "pass",
+      "ms": 3631
+    }
+  ]
+}

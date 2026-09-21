@@ -1,0 +1,18 @@
+{
+  "name": "qwen-chrome-gauntlet",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "QA gauntlet for the Qwen 3.8 Chrome extension: Ask Gemini parity tests",
+  "scripts": {
+    "gauntlet": "node scripts/run.js --mode=mock",
+    "gauntlet:real": "node scripts/run.js --mode=real",
+    "gauntlet:stub": "node scripts/run.js --mode=mock --extension=stub-extension",
+    "gauntlet:loop": "node scripts/loop.js",
+    "servers": "node scripts/servers.js",
+    "test": "node scripts/run.js --mode=mock --extension=stub-extension"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0"
+  }
+}

@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Gauntlet stub</title>
+<style>
+  body { font: 14px system-ui, sans-serif; margin: 0; padding: 12px; }
+  #error { display: none; background: #fee2e2; border: 1px solid #fca5a5; color: #7f1d1d;
+           padding: 10px; border-radius: 6px; white-space: pre-wrap; margin-bottom: 10px; }
+  #error.show { display: block; }
+  #messages { min-height: 120px; white-space: pre-wrap; }
+  textarea { width: 100%; box-sizing: border-box; }
+</style>
+</head>
+<body>
+  <div id="error" data-testid="qwen-error"></div>
+  <div id="messages" data-testid="qwen-messages"></div>
+  <textarea id="input" data-testid="qwen-input" rows="3" placeholder="Ask about this page"></textarea>
+  <button id="send" data-testid="qwen-send">Send</button>
+  <script type="module" src="sidepanel.js"></script>
+</body>
+</html>

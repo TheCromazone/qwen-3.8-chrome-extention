@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "Gauntlet reference stub",
+  "version": "0.1.0",
+  "description": "Reference implementation of CONTRACT.md. Exists to prove the gauntlet harness, not to be used.",
+  "permissions": ["storage", "tabs", "scripting", "activeTab"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "side_panel": { "default_path": "sidepanel.html" },
+  "action": { "default_title": "Gauntlet stub" }
+}
