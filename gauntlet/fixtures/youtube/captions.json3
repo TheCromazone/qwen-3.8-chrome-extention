@@ -1,0 +1,112 @@
+{
+  "events": [
+    {
+      "tStartMs": 0,
+      "dDurationMs": 34000,
+      "segs": [
+        {
+          "utf8": "Right, so the plan today is to build a hydraulic press out of what is already in the yard."
+        }
+      ]
+    },
+    {
+      "tStartMs": 34000,
+      "dDurationMs": 38000,
+      "segs": [
+        {
+          "utf8": "The frame is two lengths of 200 by 100 channel, off a scrapped gantry crane."
+        }
+      ]
+    },
+    {
+      "tStartMs": 72000,
+      "dDurationMs": 46000,
+      "segs": [
+        {
+          "utf8": "I am rating the finished thing at twenty tonnes, which is conservative for the ram I have got."
+        }
+      ]
+    },
+    {
+      "tStartMs": 118000,
+      "dDurationMs": 42000,
+      "segs": [
+        {
+          "utf8": "The ram is a 100 millimetre bore cylinder, and it came off a forklift mast."
+        }
+      ]
+    },
+    {
+      "tStartMs": 160000,
+      "dDurationMs": 45000,
+      "segs": [
+        {
+          "utf8": "Welding the frame: full penetration on the top and bottom plates, stitched on the uprights."
+        }
+      ]
+    },
+    {
+      "tStartMs": 205000,
+      "dDurationMs": 45000,
+      "segs": [
+        {
+          "utf8": "A mistake I made here was not stress relieving the top plate, and it did distort about two millimetres."
+        }
+      ]
+    },
+    {
+      "tStartMs": 250000,
+      "dDurationMs": 38000,
+      "segs": [
+        {
+          "utf8": "Now, calibration. I am using a load cell borrowed from the university to check the gauge reads true."
+        }
+      ]
+    },
+    {
+      "tStartMs": 288000,
+      "dDurationMs": 42000,
+      "segs": [
+        {
+          "utf8": "The gauge was reading eleven percent high at the top of the range, which would have been embarrassing."
+        }
+      ]
+    },
+    {
+      "tStartMs": 330000,
+      "dDurationMs": 45000,
+      "segs": [
+        {
+          "utf8": "The pump is a two-stage hand pump, because an electric one was three times the price."
+        }
+      ]
+    },
+    {
+      "tStartMs": 375000,
+      "dDurationMs": 47000,
+      "segs": [
+        {
+          "utf8": "First test: we crush a solid billet of aluminium, and the frame does not move at all."
+        }
+      ]
+    },
+    {
+      "tStartMs": 422000,
+      "dDurationMs": 43000,
+      "segs": [
+        {
+          "utf8": "Total cost came to four hundred and twenty pounds, nearly all of it the seals and the gauge."
+        }
+      ]
+    },
+    {
+      "tStartMs": 465000,
+      "dDurationMs": 40000,
+      "segs": [
+        {
+          "utf8": "If I built it again I would make the throat deeper. That is the one thing I would change."
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Fleet dashboard</title></head>
+<body>
+<h1>Fleet dashboard</h1>
+<p>Utilisation over the last 30 days.</p>
+<canvas id="chart" width="520" height="220"></canvas>
+<p id="caption">Rendered client-side. Values are not in the DOM.</p>
+<script>
+const c = document.getElementById('chart').getContext('2d');
+c.fillStyle = '#ffffff'; c.fillRect(0,0,520,220);
+c.fillStyle = '#111827'; c.font = 'bold 20px sans-serif';
+c.fillText('Average utilisation', 20, 36);
+c.font = 'bold 64px sans-serif'; c.fillStyle = '#1d4ed8';
+c.fillText('41.8', 20, 110);
+c.font = '18px sans-serif'; c.fillStyle = '#374151';
+c.fillText('percent, 30-day mean', 20, 145);
+c.fillText('peak 77.2  ·  trough 12.4', 20, 178);
+</script>
+</body></html>

@@ -1,0 +1,99 @@
+name: gauntlet
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# The scoreboard comment needs this. Annotations do not, which is why the
+# annotation step is the one relied on when a run has to explain itself.
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  mock:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install
+        working-directory: gauntlet
+        run: npm install
+
+      - name: Install Chromium
+        working-directory: gauntlet
+        run: npx playwright install --with-deps chromium
+
+      # Extensions do not load in headless Chrome, so the run needs a display.
+      - name: Install Xvfb
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+
+      # The stub implements gauntlet/CONTRACT.md and nothing else. If this goes
+      # red, the harness is broken — not whatever extension is being tested.
+      - name: Harness baseline (reference stub)
+        working-directory: gauntlet
+        run: node scripts/run.js --mode=mock --extension=stub-extension
+
+      - name: Build the extension
+        id: build
+        run: |
+          if [ -f package.json ] && grep -q '"build"' package.json; then
+            npm install && npm run build
+            echo "built=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No extension build in this branch yet; skipping." >&2
+            echo "built=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Gauntlet against the extension
+        if: steps.build.outputs.built == 'true'
+        working-directory: gauntlet
+        run: node scripts/run.js --mode=mock --extension=../dist
+
+      # Annotations ride the workflow command protocol, so they need no token
+      # permissions and they come back through the check-runs API. That is the
+      # difference between a red run that explains itself and one whose only
+      # evidence is a log inside an artifact.
+      - name: Annotate failures
+        if: always()
+        working-directory: gauntlet
+        run: node scripts/annotate.js --mode=mock
+
+      # The scoreboard is the point of the run, so put it where a reader is:
+      # in the job summary, and on the pull request itself.
+      - name: Job summary
+        if: always()
+        run: cat gauntlet/results/scoreboard.mock.md >> "$GITHUB_STEP_SUMMARY" || echo "No scoreboard was produced." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Comment the scoreboard on the pull request
+        if: always() && github.event_name == 'pull_request'
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = 'gauntlet/results/scoreboard.mock.md';
+            const body =
+              (fs.existsSync(path) ? fs.readFileSync(path, 'utf8') : 'The gauntlet produced no scoreboard; it failed before any task ran.')
+                .slice(0, 60000);
+            const marker = '<!-- gauntlet-scoreboard -->';
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const existing = (await github.rest.issues.listComments({ owner, repo, issue_number }))
+              .data.find((c) => c.body?.startsWith(marker));
+            // One comment, updated in place: a scoreboard per push would bury
+            // the thing it is meant to make visible.
+            const full = `${marker}\n${body}`;
+            if (existing) await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body: full });
+            else await github.rest.issues.createComment({ owner, repo, issue_number, body: full });
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scoreboard
+          path: gauntlet/results/
