@@ -5,6 +5,12 @@ on:
     branches: [main]
   pull_request:
 
+# The scoreboard comment needs this. Annotations do not, which is why the
+# annotation step is the one relied on when a run has to explain itself.
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   mock:
     runs-on: ubuntu-latest
@@ -49,15 +55,24 @@ jobs:
         working-directory: gauntlet
         run: node scripts/run.js --mode=mock --extension=../dist
 
+      # Annotations ride the workflow command protocol, so they need no token
+      # permissions and they come back through the check-runs API. That is the
+      # difference between a red run that explains itself and one whose only
+      # evidence is a log inside an artifact.
+      - name: Annotate failures
+        if: always()
+        working-directory: gauntlet
+        run: node scripts/annotate.js --mode=mock
+
       # The scoreboard is the point of the run, so put it where a reader is:
-      # in the job summary, and on the pull request itself. A CI failure whose
-      # only evidence is a log buried in an artifact is a failure nobody reads.
+      # in the job summary, and on the pull request itself.
       - name: Job summary
         if: always()
         run: cat gauntlet/results/scoreboard.mock.md >> "$GITHUB_STEP_SUMMARY" || echo "No scoreboard was produced." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Comment the scoreboard on the pull request
         if: always() && github.event_name == 'pull_request'
+        continue-on-error: true
         uses: actions/github-script@v7
         with:
           script: |

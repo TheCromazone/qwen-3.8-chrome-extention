@@ -1,7 +1,7 @@
 {
   "mode": "mock",
-  "startedAt": 1789973311069,
-  "finishedAt": 1789973312072,
+  "startedAt": 1789973477195,
+  "finishedAt": 1789973488997,
   "environment": {
     "node": "v22.22.2",
     "playwright": "1.63.0",
@@ -12,12 +12,29 @@
   },
   "results": [
     {
-      "id": "G01",
-      "name": "article-question",
+      "id": "G04",
+      "name": "deep-page-recall",
       "group": "A",
       "mode": "mock",
-      "status": "pass",
-      "ms": 888
+      "status": "fail",
+      "ms": 5301,
+      "why": "the fact buried deep in the page never reached the model — extraction truncated the page",
+      "observed": {
+        "promptChars": 24950,
+        "pageChars": 62584
+      }
+    },
+    {
+      "id": "G19",
+      "name": "credential-guard",
+      "group": "F",
+      "mode": "mock",
+      "status": "fail",
+      "ms": 6291,
+      "why": "the agent typed into a password field",
+      "observed": {
+        "typedPassword": "hunter2"
+      }
     }
   ]
 }
