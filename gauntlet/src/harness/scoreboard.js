@@ -1,6 +1,7 @@
 // Scoreboard rendering and run-to-run diffing.
 import fs from 'node:fs';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 
 export function summarise(run) {
   const pass = run.results.filter((r) => r.status === 'pass').length;
@@ -9,12 +10,46 @@ export function summarise(run) {
   return { pass, fail, skip, total: pass + fail, score: pass + fail === 0 ? 0 : pass / (pass + fail) };
 }
 
+/**
+ * What differs between one machine and another. When a run passes locally and
+ * fails in CI it is nearly always one of these, and none of them shows up in
+ * the failure message itself.
+ */
+export function environment() {
+  let playwright = 'unknown';
+  try {
+    playwright = createRequire(import.meta.url)('@playwright/test/package.json').version;
+  } catch { /* not resolvable from here */ }
+  return {
+    node: process.version,
+    playwright,
+    platform: `${process.platform} ${process.arch}`,
+    chromium: process.env.GAUNTLET_CHROMIUM ?? detectChromium() ?? "Playwright's own (channel: chromium)",
+    display: process.env.DISPLAY || '(none — run.js re-execs under Xvfb)',
+    ci: process.env.CI === 'true' ? 'yes' : 'no'
+  };
+}
+
+function detectChromium() {
+  for (const candidate of ['/opt/pw-browsers/chromium']) {
+    try { fs.accessSync(candidate, fs.constants.X_OK); return candidate; } catch { /* next */ }
+  }
+  return null;
+}
+
 export function renderMarkdown(run, previous = null) {
   const s = summarise(run);
   const lines = [];
   lines.push(`# Gauntlet scoreboard — ${run.mode} mode`);
   lines.push('');
   lines.push(`Run at ${new Date(run.startedAt).toISOString()}, took ${Math.round((run.finishedAt - run.startedAt) / 1000)}s.`);
+  lines.push('');
+  const env = run.environment ?? environment();
+  lines.push(
+    '<sub>' +
+      Object.entries(env).map(([k, v]) => `${k}: ${v}`).join(' · ') +
+      '</sub>'
+  );
   lines.push('');
   lines.push(`**${s.pass} passed, ${s.fail} failed, ${s.skip} skipped** — score ${(s.score * 100).toFixed(0)}%`);
   lines.push('');
